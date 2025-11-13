@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label"
 
 export default function EmailApp() {
   const [activeTab, setActiveTab] = useState<"config" | "contacts" | "compose" | "history">("config")
-  const [isTestingMode, setIsTestingMode] = useState(true) // NEW: State for testing mode
+  const [isTestingMode, setIsTestingMode] = useState(false)
   const [config, setConfig] = useState<{
     mailgunDomain: string
     fromEmail: string
@@ -38,13 +38,11 @@ export default function EmailApp() {
     fetchConfig()
   }, [])
 
-  // Config is only valid if essential fields are present AND it's loaded from env (no client-side saving allowed)
   const isConfigValid = config?.mailgunDomain && config?.fromEmail && config?.isFromEnv
 
   const handleTestingModeChange = (checked: boolean) => {
     if (!checked) {
       if (!window.confirm("WARNING: Disabling Testing Mode will allow sending to ALL contacts without limits (up to Mailgun plan limits). Are you sure you want to proceed?")) {
-        // If user cancels confirmation, keep the box checked
         return
       }
     }
@@ -53,14 +51,12 @@ export default function EmailApp() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-7xl mx-auto p-6">
-        {/* Header */}
+      <div className="w-full p-6">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-foreground mb-2">Email Campaign Manager</h1>
           <p className="text-muted-foreground">Send personalized emails with Mailgun</p>
         </div>
         
-        {/* Testing Mode Control */}
         <div className="flex items-center space-x-2 mb-6 p-4 border rounded-lg bg-yellow-50/50 dark:bg-yellow-950/30">
           <Checkbox 
             id="testing-mode" 
@@ -72,7 +68,6 @@ export default function EmailApp() {
           </Label>
         </div>
 
-        {/* Tabs */}
         <div className="flex gap-2 mb-6 border-b border-border">
           <Button
             variant={activeTab === "config" ? "default" : "ghost"}
@@ -107,7 +102,6 @@ export default function EmailApp() {
           </Button>
         </div>
 
-        {/* Tab Content */}
         <Card className="p-6">
           {loading ? (
             <div className="text-center py-8">Loading configuration...</div>

@@ -3,7 +3,6 @@ import { neon } from "@neondatabase/serverless";
 const sql = neon(process.env.DATABASE_URL!);
 
 export async function GET() {
-  // Always load from environment variables as per user request
   const mailgunApiKey = process.env.MAILGUN_API_KEY;
   const mailgunDomain = process.env.MAILGUN_DOMAIN || "";
   const fromEmail = process.env.MAILGUN_FROM_EMAIL || "";
@@ -15,11 +14,9 @@ export async function GET() {
       fromEmail,
       fromName,
       isFromEnv: true,
-      // API Key is intentionally NOT returned to the client
     });
   }
 
-  // If critical ENV variables are missing, indicate a read-only configuration failure.
   return Response.json(
     {
       mailgunDomain: fromName,
@@ -33,12 +30,22 @@ export async function GET() {
   );
 }
 
-// POST function has been removed to prevent saving config to the database,
-// ensuring configuration is exclusively from environment variables.
-
 export async function POST(request: Request) {
   try {
-    const { mailgunDomain, fromEmail, fromName } = await request.json();
+    const body = await request.json();
+    const { mailgunDomain, fromEmail, fromName, secretCode } = body;
+
+    const SEND_SECRET_CODE = process.env.SEND_SECRET_CODE;
+    if (secretCode !== undefined) {
+      if (!SEND_SECRET_CODE) {
+        return Response.json({ verified: true, error: "Warning: SEND_SECRET_CODE environment variable is not set on the server." });
+      }
+      if (secretCode === SEND_SECRET_CODE) {
+        return Response.json({ verified: true });
+      } else {
+        return Response.json({ verified: false, error: "Secret code is invalid." }, { status: 401 });
+      }
+    }
 
     if (!mailgunDomain || !fromEmail) {
       return Response.json(
@@ -51,7 +58,7 @@ export async function POST(request: Request) {
 
     return Response.json({ success: true });
   } catch (error) {
-    console.error("Error saving config:", error);
-    return Response.json({ error: "Failed to save config" }, { status: 500 });
+    console.error("Error saving config/verifying secret:", error);
+    return Response.json({ error: "Failed to process request" }, { status: 500 });
   }
 }
