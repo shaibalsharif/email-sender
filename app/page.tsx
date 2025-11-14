@@ -6,14 +6,16 @@ import { useState, useEffect } from "react"
 import ConfigTab from "@/components/email/config-tab"
 import ContactsTab from "@/components/email/contacts-tab"
 import ComposeTab from "@/components/email/compose-tab"
-import HistoryTab from "@/components/email/history-tab"
+import LocalHistoryTab from "@/components/email/local-history-tab" // RENAMED
+import ScheduledTab from "@/components/email/scheduled-tab"
+import MailgunHistoryTab from "@/components/email/mailgun-history-tab" // NEW IMPORT
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 
 export default function EmailApp() {
-  const [activeTab, setActiveTab] = useState<"config" | "contacts" | "compose" | "history">("config")
+  const [activeTab, setActiveTab] = useState<"config" | "contacts" | "compose" | "local-history" | "mailgun-history" | "scheduled">("config") // UPDATED TABS
   const [isTestingMode, setIsTestingMode] = useState(false)
   const [config, setConfig] = useState<{
     mailgunDomain: string
@@ -71,8 +73,8 @@ export default function EmailApp() {
         </div>
 
         {/* --- STICKY TABS START --- */}
-        <div className="sticky top-0 z-10 bg-background pb-2"> {/* Added sticky, top-0, z-10, and pb-2 for separation */}
-            <div className="flex gap-2 border-b border-border"> 
+        <div className="sticky top-0 z-10 bg-background pb-2">
+            <div className="flex gap-2 border-b border-border overflow-x-auto whitespace-nowrap">
               <Button
                 variant={activeTab === "config" ? "default" : "ghost"}
                 onClick={() => setActiveTab("config")}
@@ -96,13 +98,32 @@ export default function EmailApp() {
               >
                 Compose
               </Button>
+              {/* LOCAL HISTORY TAB */}
               <Button
-                variant={activeTab === "history" ? "default" : "ghost"}
-                onClick={() => setActiveTab("history")}
+                variant={activeTab === "local-history" ? "default" : "ghost"}
+                onClick={() => setActiveTab("local-history")}
                 disabled={!isConfigValid}
                 className="rounded-b-none"
               >
-                History
+                Local History
+              </Button>
+              {/* MAILGUN HISTORY TAB */}
+              <Button
+                variant={activeTab === "mailgun-history" ? "default" : "ghost"}
+                onClick={() => setActiveTab("mailgun-history")}
+                disabled={!isConfigValid}
+                className="rounded-b-none"
+              >
+                Mailgun History
+              </Button>
+              {/* SCHEDULED TAB */}
+              <Button
+                variant={activeTab === "scheduled" ? "default" : "ghost"}
+                onClick={() => setActiveTab("scheduled")}
+                disabled={!isConfigValid}
+                className="rounded-b-none"
+              >
+                Scheduled
               </Button>
             </div>
         </div>
@@ -116,7 +137,9 @@ export default function EmailApp() {
               {activeTab === "config" && <ConfigTab onConfigSaved={setConfig} />}
               {activeTab === "contacts" && <ContactsTab />}
               {activeTab === "compose" && <ComposeTab config={config} isTestingMode={isTestingMode} />}
-              {activeTab === "history" && <HistoryTab />}
+              {activeTab === "local-history" && <LocalHistoryTab />} {/* RENAMED */}
+              {activeTab === "mailgun-history" && <MailgunHistoryTab />} {/* NEW */}
+              {activeTab === "scheduled" && <ScheduledTab />}
             </>
           )}
         </Card>

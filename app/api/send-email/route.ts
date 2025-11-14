@@ -10,6 +10,11 @@ const replaceVariables = (template: string, values: Record<string, any>) => {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => values[key] || `{{${key}}}`)
 }
 
+// NEW: Convert {{variable}} syntax to Mailgun's %recipient.variable% syntax
+const convertToMailgunVariables = (template: string): string => {
+  // Use a negative lookbehind assertion to ensure we don't accidentally match existing Mailgun variables if they were used
+  return template.replace(/\{\{(\w+)\}\}(?![\s\S]*%recipient\.\w+%)/g, (_, key) => `%recipient.${key}%`)
+}
 
 // Helper function for rich-text processing (FIXED TO PROTECT MAILGUN VARIABLES)
 const processBodyToHtml = (content: string): string => {
@@ -18,10 +23,9 @@ const processBodyToHtml = (content: string): string => {
   let processedBody = content
   
   // --- FIX START: Temporarily replace Mailgun variables to protect them ---
-  // This prevents rich-text formatting (like bolding) from wrapping or altering the {{...}} tags.
+  // Match both {{...}} and %recipient....% patterns
   const variablePlaceholders = new Map<string, string>();
-  // Match {{...}} variables
-  processedBody = processedBody.replace(/(\{\{.*?\}\})/g, (match) => {
+  processedBody = processedBody.replace(/(\{\{.*?\}\}|%recipient\.\w+%)/g, (match) => {
     const placeholder = `__MGVAR_${variablePlaceholders.size}__`;
     variablePlaceholders.set(placeholder, match);
     return placeholder;
@@ -64,7 +68,7 @@ const processBodyToHtml = (content: string): string => {
   processedBody = processedBody.replace(/<br\/><h3/g, '<h3') 
   processedBody = processedBody.replace(/<\/h3><br\/>/g, '</h3>')
   
-  // --- FIX START: Restore Mailgun variables (guarantees Mailgun receives intact {{...}} tags) ---
+  // --- FIX START: Restore Mailgun variables (guarantees Mailgun receives intact variables) ---
   variablePlaceholders.forEach((original, placeholder) => {
       processedBody = processedBody.replace(placeholder, original);
   });
@@ -82,7 +86,8 @@ export async function POST(request: Request) {
       imageUrl, 
       mailgunDomain, 
       fromEmail, 
-      fromName 
+      fromName,
+      batchName, // NEW: Batch name for tracking
     } = await request.json()
 
     const mailgunApiKey = process.env.MAILGUN_API_KEY
@@ -109,8 +114,12 @@ export async function POST(request: Request) {
       }
     }
     
-    // 2. Process HTML Body 
-    const processedHtmlContent = processBodyToHtml(bodyTemplate)
+    // 2. Convert templates to Mailgun's %recipient.variable% syntax
+    const mailgunSubject = convertToMailgunVariables(subjectTemplate)
+    const mailgunBody = convertToMailgunVariables(bodyTemplate)
+    
+    // 3. Process HTML Body 
+    const processedHtmlContent = processBodyToHtml(mailgunBody)
 
     const htmlBody = `
       <html>
@@ -132,11 +141,10 @@ export async function POST(request: Request) {
     const formData = new FormData()
     formData.append("from", `${fromName || "Sender"} <${fromEmail}>`)
     formData.append("to", toList.join(",")) // Mailgun resolves variables based on this list
-    formData.append("subject", subjectTemplate) 
-    formData.append("html", htmlBody) 
+    formData.append("subject", mailgunSubject) // Use converted subject
+    formData.append("html", htmlBody) // Use converted body
 
-    // --- CRITICAL FIX 2: Use 'recipient-variables' form field property ---
-    // Submitting as a form field property is more robust for combined scheduling/batch features.
+    // Submit recipient variables as a form field
     formData.append("recipient-variables", JSON.stringify(recipientVariables))
     
     // Add Mailgun Scheduling (o:delivery-time)
@@ -144,8 +152,8 @@ export async function POST(request: Request) {
     const formattedScheduledTime = format(scheduledDate, "eee, dd MMM yyyy HH:mm:ss xx")
     formData.append("o:delivery-time", formattedScheduledTime)
 
-    // Optional tag for tracking
-    formData.append("o:tag", "scheduled-batch")
+    // Optional tag for tracking (Using the unique batch name)
+    formData.append("o:tag", batchName)
 
     const mailgunResponse = await fetch(`https://api.mailgun.net/v3/${mailgunDomain}/messages`, {
       method: "POST",
@@ -169,7 +177,7 @@ export async function POST(request: Request) {
       return Response.json({ error: `Mailgun failed to schedule batch of ${batchSize} emails. Check console for details.` }, { status: 500 })
     }
 
-    // 3. Log each email in the history table
+    // 3. Log each email in the history table (with ORIGINAL {{}} syntax for readability)
     const dbPromises = batchRecipients.map((recipient: any) => {
         // We log the *personalized* subject/body to the DB history for easier viewing
         const allFields = { name: recipient.name, ...recipient.custom_fields };
