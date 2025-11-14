@@ -1,3 +1,5 @@
+-- shaibal-tiller/email-sender/email-sender-2c729b716bad772b42daa15e94a023a390ca7702/scripts/01-init-email-db.sql
+
 -- Create mailgun config table
 CREATE TABLE IF NOT EXISTS mailgun_config (
   id SERIAL PRIMARY KEY,
@@ -28,6 +30,8 @@ CREATE TABLE IF NOT EXISTS email_history (
   image_url VARCHAR(2048),
   status VARCHAR(50) NOT NULL DEFAULT 'pending',
   mailgun_message_id VARCHAR(255),
+  -- New column to store the scheduled delivery time
+  scheduled_at TIMESTAMP, 
   sent_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

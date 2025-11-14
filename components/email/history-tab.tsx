@@ -1,12 +1,14 @@
+// shaibal-tiller/email-sender/email-sender-2c729b716bad772b42daa15e94a023a390ca7702/components/email/history-tab.tsx
+
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Download } from "lucide-react"
+import { Download, Check, Clock, X } from "lucide-react"
 
 interface EmailRecord {
   id: number
@@ -16,6 +18,7 @@ interface EmailRecord {
   status: string
   sent_at?: string
   created_at: string
+  scheduled_at?: string 
 }
 
 export default function HistoryTab() {
@@ -25,23 +28,25 @@ export default function HistoryTab() {
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [isLoading, setIsLoading] = useState(true)
 
-  useEffect(() => {
-    const loadHistory = async () => {
-      try {
-        const response = await fetch("/api/email-history")
-        if (response.ok) {
-          const data = await response.json()
-          setHistory(data)
-        } else {
-          setHistory([])
-        }
-      } catch (error) {
+  const loadHistory = async () => {
+    setIsLoading(true)
+    try {
+      const response = await fetch("/api/email-history")
+      if (response.ok) {
+        const data = await response.json()
+        setHistory(data)
+      } else {
         setHistory([])
-      } finally {
-        setIsLoading(false)
       }
+    } catch (error) {
+      setHistory([])
+    } finally {
+      setIsLoading(false)
     }
-
+  }
+  
+  // FIX: Ensure history loads on component mount
+  useEffect(() => {
     loadHistory()
   }, [])
 
@@ -64,21 +69,23 @@ export default function HistoryTab() {
     setFilteredHistory(filtered)
   }, [history, statusFilter, searchTerm])
 
-  const stats = {
+  const stats = useMemo(() => ({
     total: history.length,
     sent: history.filter((h) => h.status === "sent").length,
+    scheduled: history.filter((h) => h.status === "scheduled").length,
     failed: history.filter((h) => h.status === "failed").length,
     pending: history.filter((h) => h.status === "pending").length,
-  }
+  }), [history])
 
   const handleExport = () => {
     const csv = [
-      ["Email", "Name", "Subject", "Status", "Sent At", "Created At"],
+      ["Email", "Name", "Subject", "Status", "Scheduled At", "Sent At", "Created At"],
       ...filteredHistory.map((h) => [
         h.recipient_email,
         h.recipient_name,
         h.subject,
         h.status,
+        h.scheduled_at || "",
         h.sent_at || "",
         h.created_at,
       ]),
@@ -112,12 +119,12 @@ export default function HistoryTab() {
             <div className="text-xs text-muted-foreground">Sent</div>
           </Card>
           <Card className="p-4">
-            <div className="text-2xl font-bold text-yellow-600">{stats.pending}</div>
-            <div className="text-xs text-muted-foreground">Pending</div>
+            <div className="text-2xl font-bold text-blue-600">{stats.scheduled}</div>
+            <div className="text-xs text-muted-foreground">Scheduled</div>
           </Card>
           <Card className="p-4">
-            <div className="text-2xl font-bold text-red-600">{stats.failed}</div>
-            <div className="text-xs text-muted-foreground">Failed</div>
+            <div className="text-2xl font-bold text-red-600">{stats.failed + stats.pending}</div>
+            <div className="text-xs text-muted-foreground">Failed/Pending</div>
           </Card>
         </div>
       </div>
@@ -137,6 +144,7 @@ export default function HistoryTab() {
         >
           <option value="all">All Status</option>
           <option value="sent">Sent</option>
+          <option value="scheduled">Scheduled</option>
           <option value="pending">Pending</option>
           <option value="failed">Failed</option>
         </select>
@@ -150,7 +158,7 @@ export default function HistoryTab() {
       <ScrollArea className="h-96 border rounded-lg">
         <div className="p-4 space-y-2">
           {filteredHistory.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">No email history</div>
+            <div className="text-center py-8 text-muted-foreground">No email history found matching current filters.</div>
           ) : (
             filteredHistory.map((record) => (
               <div key={record.id} className="p-3 bg-muted rounded hover:bg-muted/80 border">
@@ -161,14 +169,21 @@ export default function HistoryTab() {
                   </div>
                   <Badge
                     variant={
-                      record.status === "sent" ? "default" : record.status === "pending" ? "secondary" : "destructive"
+                      record.status === "sent" ? "default" : record.status === "scheduled" ? "secondary" : "destructive"
                     }
                   >
                     {record.status}
                   </Badge>
                 </div>
                 <div className="text-sm mb-1">{record.subject}</div>
-                <div className="text-xs text-muted-foreground">{new Date(record.created_at).toLocaleString()}</div>
+                <div className="text-xs text-muted-foreground">
+                    {record.scheduled_at && record.status === "scheduled"
+                        ? `Scheduled for: ${new Date(record.scheduled_at).toLocaleString()}`
+                        : record.status === "sent" && record.sent_at 
+                            ? `Sent at: ${new Date(record.sent_at).toLocaleString()}`
+                            : `Created at: ${new Date(record.created_at).toLocaleString()}`
+                    }
+                </div>
               </div>
             ))
           )}
