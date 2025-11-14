@@ -34,6 +34,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/ui/spinner"
 import { Separator } from "@/components/ui/separator"
+import { useToast } from "@/hooks/use-toast" // IMPORTED useToast
 
 interface Contact {
   email: string
@@ -115,22 +116,24 @@ const processEmailBodyForPreview = (content: string): string => {
 
 
 export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
+  const { toast } = useToast(); // Initialize toast hook
+  
   const [subject, setSubject] = useState("আসন্ন বাংলাদেশ ইনস্টিটিউট অব প্ল্যানার্স (BIP) নির্বাচনে আপনার মূল্যবান সমর্থন প্রত্যাশা করছি")
   const [body, setBody] = useState(
     `**প্রিয় {{name}}**,
-     আসসালামু আলাইকুম। আশা করছি আপনি ভালো আছেন।
+     আসসালামু আলাইকুম。 আশা করছি আপনি ভালো আছেন。
 
-বাংলাদেশ ইনস্টিটিউট অব প্ল্যানার্স (BIP)-কে একটি **স্বচ্ছ, জবাবদিহিমূলক, পেশাগতভাবে শক্তিশালী এবং আন্তর্জাতিকভাবে সংযুক্ত প্রতিষ্ঠান** হিসেবে গড়ে তোলার লক্ষ্য নিয়ে আমি আসন্ন নির্বাচনে **সহ-সভাপতি (VP-II)** পদে প্রার্থী হয়েছি।
+বাংলাদেশ ইনস্টিটিউট অব প্ল্যানার্স (BIP)-কে একটি **স্বচ্ছ, জবাবদিহিমূলক, পেশাগতভাবে শক্তিশালী এবং আন্তর্জাতিকভাবে সংযুক্ত প্রতিষ্ঠান** হিসেবে গড়ে তোলার লক্ষ্য নিয়ে আমি আসন্ন নির্বাচনে **সহ-সভাপতি (VP-II)** পদে প্রার্থী হয়েছি。
 আমাদের পেশা, আমাদের প্রতিষ্ঠান এবং আমাদের সদস্যদের মর্যাদা রক্ষার জন্য আমি কিছু অগ্রাধিকারমূলক প্রতিশ্রুতি নিয়ে কাজ করতে চাই:
 
-১। পরিকল্পনা: মানসম্মত স্থানিক পরিকল্পনা চর্চা
+১。 পরিকল্পনা: মানসম্মত স্থানিক পরিকল্পনা চর্চা
 জাতীয়–আঞ্চলিক–স্থানীয় স্তরে **Spatial Planning Framework** প্রতিষ্ঠা
 **Land Use** ও **Zoning**-এর একীভূত সংজ্ঞা ও শ্রেণিবিন্যাস
 পরিকল্পনার জন্য **Standard ToR, Data Specification & Methodology** নির্ধারণ
 RAJUK, UDD, LGED ইত্যাদি সংস্থার অভিন্ন পরিকল্পনা প্রস্তুত প্রক্রিয়া
 BBRA এর ভবন নকশা প্রক্রিয়ায় **Licensed Planners** - দের বাধ্যতামূলকভাবে অন্তর্ভুক্ত
 
-২। পরিকল্পনাবিদ: ক্ষমতায়ন, কল্যাণ ও পেশাগত মর্যাদা
+২。 পরিকল্পনাবিদ: ক্ষমতায়ন, কল্যাণ ও পেশাগত মর্যাদা
 নীতিনির্ধারণে পরিকল্পনাবিদদের প্রতিনিধিত্ব বৃদ্ধি
 সরকারি (BCS) ও উন্নয়ন সংস্থায় **Planners’ posts** সৃষ্টির চলমান প্রক্রিয়া অব্যাহত রাখা
 **Welfare Fund**, আইনি সুরক্ষা ও সদস্য কল্যাণ ব্যবস্থা
@@ -138,26 +141,26 @@ BBRA এর ভবন নকশা প্রক্রিয়ায় **Licens
 **Young Planners Mentorship Program** ও পেশাগত বিশেষায়ন
 পরিকল্পনা পেশাজীবী, উন্নয়নকর্মী ও অন্যান্য পেশায় নিয়োজিত পরিকল্পনাবিদ —সব সদস্যের সমান মর্যাদা
 
-৩। প্রতিষ্ঠান: শক্তিশালী শাসনব্যবস্থা ও কার্যকর পরিচালনা
+৩。 প্রতিষ্ঠান: শক্তিশালী শাসনব্যবস্থা ও কার্যকর পরিচালনা
 **Standing Committee, Technical Working Group** ও **Subcommittee** গঠন
 সংগঠনের নীতি ও প্রক্রিয়ার হালনাগাদ
 আধুনিক ও কার্যকর **BIP Secretariat** গঠন
 **Executive Committee**-এর জবাবদিহিতা সাধারণ সদস্যদের প্রতি নিশ্চিতকরণ
 সদস্যদের আরও অর্থবহ অংশগ্রহণের জন্য meet the member, কনসালটেশন ও ফিডব্যাক সিস্টেম চালু
 
-৪। BIP Watch: উন্নয়ন পর্যবেক্ষণ ও জনস্বার্থ রক্ষা
+৪。 BIP Watch: উন্নয়ন পর্যবেক্ষণ ও জনস্বার্থ রক্ষা
 বিভিন্ন পরিকল্পনা ও প্রকল্প পর্যালোচনা ও পেশাগত মতামত
 অনুমোদিত পরিকল্পনার সাথে অসামঞ্জস্যপূর্ণ উন্নয়ন প্রতিরোধ
 পরিবেশ, দূষণ, অনিয়ম—এসব বিষয়ে সচেতনতা ও অ্যাডভোকেসি
 মিডিয়ার সাথে জনস্বার্থভিত্তিক কার্যক্রম জোরদার
 
-৫। বৈশ্বিক সংযোগ ও জাতীয় ব্র্যান্ডিং
+৫。 বৈশ্বিক সংযোগ ও জাতীয় ব্র্যান্ডিং
 APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অংশীদারিত্ব
 **Planner** পেশার জাতীয় পরিচিতি ও মর্যাদা বৃদ্ধি
 তরুণদের **Planning Profession**-এ আকৃষ্ট করার উদ্যোগ
 
 আপনার সমর্থন কেন গুরুত্বপূর্ণ?
-কারণ **BIP** আমাদের সবার।সদস্যদের মতামত, অংশগ্রহণ এবং প্রত্যাশাই একটি শক্তিশালী পেশাগত কমিউনিটি গড়ে তোলে。আমি প্রতিশ্রুতি দিচ্ছি— **সদস্যদের সম্পৃক্ততা, অংশগ্রহণ, স্বচ্ছতা ও জবাবদিহিতাই হবে আমার কাজের মূল চালিকা শক্তি。**
+কারণ **BIP** আমাদের সবার。সদস্যদের মতামত, অংশগ্রহণ এবং প্রত্যাশাই একটি শক্তিশালী পেশাগত কমিউনিটি গড়ে তোলে。আমি প্রতিশ্রুতি দিচ্ছি— **সদস্যদের সম্পৃক্ততা, অংশগ্রহণ, স্বচ্ছতা ও জবাবদিহিতাই হবে আমার কাজের মূল চালিকা শক্তি。**
 
 **আপনার মূল্যবান সমর্থন প্রত্যাশা করছি**
 আপনার মতামত, পরামর্শ বা প্রত্যাশা জানালে আমি অত্যন্ত কৃতজ্ঞ থাকবো。একটি উন্নত, শক্তিশালী এবং সদস্যকেন্দ্রিক BIP গঠনে আপনার ভোট ও সমর্থন আমার জন্য অত্যন্ত গুরুত্বপূর্ণ。
@@ -175,6 +178,9 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
   const [isMailPreviewOpen, setIsMailPreviewOpen] = useState(false); // Stage 1 Modal
   const [isContactSelectionOpen, setIsContactSelectionOpen] = useState(false); // Stage 2 Modal
   const [contactSearchTerm, setContactSearchTerm] = useState("");
+  
+  // New state for company filtering
+  const [companyFilter, setCompanyFilter] = useState("all");
 
   // Configurable Batch States
   const [batchSizeInput, setBatchSizeInput] = useState(DEFAULT_BATCH_SIZE.toString());
@@ -183,13 +189,12 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
   const [batchSettingsError, setBatchSettingsError] = useState<string | null>(null);
 
   // Progress States
-  const [sending, setSending] = useState(false)
+  const [schedulingLoading, setSchedulingLoading] = useState(false) // General loading state
   const [progress, setProgress] = useState(0) 
   const [totalRecipients, setTotalRecipients] = useState(0) 
   const [totalBatches, setTotalBatches] = useState(0) 
 
   const [previewContact, setPreviewContact] = useState<Contact | null>(null)
-  const [status, setStatus] = useState<{ type: "success" | "error" | "info"; message: string } | null>(null)
   const [imageUrl, setImageUrl] = useState("https://38y39fcx57.ufs.sh/f/mMGqMdgQNemikJNpBtzqlJrgITZDsSjhbB7K9eUa3MdxPvqL")
   const [secretCode, setSecretCode] = useState("")
   const [verificationError, setVerificationError] = useState<string | null>(null)
@@ -209,7 +214,11 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
         }
       } catch (error) {
         setContacts([])
-        console.error("Error fetching contacts:", error)
+        toast({
+            title: "Error loading contacts",
+            description: "Network error occurred while fetching contacts.",
+            variant: "destructive",
+        })
       }
     }
     loadContacts()
@@ -224,14 +233,27 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
     return contactsToUse;
   }, [contacts, isTestingMode]);
   
+  // Memoized available unique companies
+  const uniqueCompanies = useMemo(() => {
+      const companies = new Set<string>();
+      contacts.forEach(c => {
+          if (c.custom_fields.company) {
+              companies.add(c.custom_fields.company);
+          }
+      });
+      return Array.from(companies).sort();
+  }, [contacts]);
+
   // Memoized contacts for the modal grid view
   const filteredContactsInModal = useMemo(() => {
     return contactsToSchedule
         .filter(c => 
-            c.email.toLowerCase().includes(contactSearchTerm.toLowerCase()) || 
-            c.name.toLowerCase().includes(contactSearchTerm.toLowerCase())
+            (c.email.toLowerCase().includes(contactSearchTerm.toLowerCase()) || 
+            c.name.toLowerCase().includes(contactSearchTerm.toLowerCase())) &&
+            // Apply Company Filter
+            (companyFilter === "all" || (companyFilter === "none" && !c.custom_fields.company) || (c.custom_fields.company === companyFilter))
         )
-  }, [contactsToSchedule, contactSearchTerm])
+  }, [contactsToSchedule, contactSearchTerm, companyFilter])
 
 
   // Calculate dynamic preview contact data
@@ -251,7 +273,7 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
   }, [subject, body])
 
 
-  // --- Scheduling Conflict Logic ---
+  // --- Scheduling Conflict Logic (unchanged) ---
 
   useEffect(() => {
     if (isContactSelectionOpen) {
@@ -319,11 +341,19 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
 
   const handleEditorProceed = () => {
     if (!config || !config.mailgunDomain || !config.fromEmail) {
-        setStatus({ type: "error", message: "Missing configuration. Check the Configuration tab." });
+        toast({
+            title: "Configuration Error",
+            description: "Missing configuration. Check the Configuration tab.",
+            variant: "destructive",
+        });
         return;
     }
     if (contacts.length === 0) {
-        setStatus({ type: "error", message: "No contacts available. Upload a CSV in the Contacts tab." });
+        toast({
+            title: "Contact Error",
+            description: "No contacts available. Upload a CSV in the Contacts tab.",
+            variant: "destructive",
+        });
         return;
     }
     // Set default selection to all valid contacts
@@ -333,7 +363,11 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
   
   const handlePreviewOpen = () => {
     if (!config || !config.mailgunDomain || !config.fromEmail) {
-        setStatus({ type: "error", message: "Missing configuration. Check the Configuration tab." });
+        toast({
+            title: "Configuration Error",
+            description: "Missing configuration. Check the Configuration tab.",
+            variant: "destructive",
+        });
         return;
     }
     // Reset preview to a default contact if not set
@@ -368,7 +402,6 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
   // --- Final Send Logic ---
 
   const verifyAndSend = async () => {
-    // FIX for Issue 4: Filter contacts from the master list using selected emails
     const recipients = contactsToSchedule.filter(c => selectedContactEmails.includes(c.email));
 
     const batchSize = parseInt(batchSizeInput);
@@ -395,7 +428,7 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
     }
     
     // --- START: Security Check ---
-    setSending(true);
+    setSchedulingLoading(true); // Start loading for verification
     setVerificationError(null);
 
     if (!isTestingMode) {
@@ -406,24 +439,38 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
       });
 
       if (!verificationResponse.ok) {
-        setSending(false);
+        setSchedulingLoading(false);
         setVerificationError("Verification failed: Network error.");
+        toast({
+            title: "Verification Failed",
+            description: "Network error during verification.",
+            variant: "destructive",
+        });
         return;
       }
 
       const verificationData = await verificationResponse.json();
 
       if (!verificationData.verified) {
-        setSending(false);
+        setSchedulingLoading(false);
         setVerificationError(verificationData.error || "Secret code is invalid.");
+        toast({
+            title: "Verification Failed",
+            description: verificationData.error || "Secret code is invalid.",
+            variant: "destructive",
+        });
         return;
       }
     }
 
     if (!config) {
-      setSending(false);
-      setStatus({ type: "error", message: "Configuration missing. Cannot proceed." });
-      setIsContactSelectionOpen(false); // Close final modal
+      setSchedulingLoading(false);
+       toast({
+            title: "Configuration Missing",
+            description: "Mailgun configuration is missing. Cannot proceed.",
+            variant: "destructive",
+        });
+      setIsContactSelectionOpen(false); 
       return;
     }
 
@@ -492,58 +539,34 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
             setProgress(i + 1); 
         }
 
-        setStatus({
-            type: "success",
-            message: `Campaign scheduled successfully! ${batchesScheduled} batches (${totalCount} emails) sent to Mailgun for delayed delivery. Personalization is active.`
+        toast({
+            title: "Campaign Scheduled! 🎉",
+            description: `Successfully scheduled ${batchesScheduled} batches (${totalCount} emails) for delayed delivery.`,
         });
         
     } catch (error) {
         console.error("Error during campaign scheduling:", error);
-        setStatus({
-            type: "error",
-            message: `Campaign scheduling failed after Batch ${batchesScheduled}. Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+        toast({
+            title: "Scheduling Failed",
+            description: `Campaign stopped after Batch ${batchesScheduled}. Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            variant: "destructive",
         });
     } finally {
-        setSending(false);
+        setSchedulingLoading(false);
         setSecretCode("");
     }
   }
 
   // Determine if the Confirm/Preview buttons should be disabled
-  const isButtonDisabled = sending || !config || !contacts.length;
+  const isButtonDisabled = schedulingLoading || !config || !contacts.length;
   const selectedCount = selectedContactEmails.length;
 
 
   return (
     <div className="space-y-6">
       
-      {/* --- STATUS/PROGRESS MESSAGES (Always visible in main view) --- */}
-      {status && (
-        <Alert
-          className={
-            status.type === "success"
-              ? "border-green-200 bg-green-50 dark:bg-green-950"
-              : status.type === "error"
-                ? "border-red-200 bg-red-50 dark:bg-red-950"
-                : "border-blue-200 bg-blue-50 dark:bg-blue-950"
-          }
-        >
-          {status.type === "success" ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : status.type === "error" ? <AlertCircle className="h-4 w-4 text-red-600" /> : <Hourglass className="h-4 w-4 text-blue-600" />}
-          <AlertDescription
-            className={
-              status.type === "success"
-                ? "text-green-800 dark:text-green-200"
-                : status.type === "error"
-                  ? "text-red-800 dark:text-red-200"
-                  : "text-blue-800 dark:text-blue-200"
-            }
-          >
-            {status.message}
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {sending && (
+      {/* --- PROGRESS MESSAGE (Always visible in main view) --- */}
+      {schedulingLoading && (
         <Card className="p-4 flex flex-col items-center space-y-3">
           <div className="flex items-center space-x-2 text-primary">
             <Spinner className="w-5 h-5" />
@@ -574,7 +597,7 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
                 <div className="grid sm:grid-cols-2 gap-4">
                     <div>
                         <label className="block text-sm font-medium mb-2">Subject</label>
-                        <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Email subject..." disabled={sending} />
+                        <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Email subject..." disabled={schedulingLoading} />
                     </div>
 
                     <div>
@@ -583,7 +606,7 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
                             placeholder="https://example.com/image.jpg"
                             value={imageUrl}
                             onChange={(e) => setImageUrl(e.target.value)}
-                            disabled={sending}
+                            disabled={schedulingLoading}
                         />
                     </div>
                 </div>
@@ -596,8 +619,9 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
                     value={body}
                     onChange={(e) => setBody(e.target.value)}
                     placeholder="Email body... Enter HTML, Plain Text, **bold**, or 1। Heading"
-                    className="w-full h-64 p-3 border border-input rounded-lg bg-background font-mono text-sm resize-none"
-                    disabled={sending}
+                    // --- INCREASED BODY HEIGHT TO h-96 ---
+                    className="w-full h-96 p-3 border border-input rounded-lg bg-background font-mono text-sm resize-none" 
+                    disabled={schedulingLoading}
                     />
                 </div>
             </div>
@@ -652,7 +676,7 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
         <DialogContent
           className="max-w-[calc(100%-2rem)] sm:max-w-[90vw] p-0"
         >
-          <DialogHeader className="p-6 pb-0 flex-row items-center justify-between !gap-4"> {/* Adjusted for flex layout */}
+          <DialogHeader className="p-6 pb-0 flex-row items-center justify-between !gap-4">
             <div className="flex flex-col gap-1.5">
                 <DialogTitle className="flex items-center gap-2">
                   <Mail className="w-5 h-5" /> Full Email Preview
@@ -720,7 +744,7 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
         <DialogContent
           className="max-w-[calc(100%-2rem)] sm:max-w-[90vw] p-0"
         >
-          <DialogHeader className="p-6 pb-0 flex-row items-center justify-between !gap-4"> {/* Adjusted for flex layout */}
+          <DialogHeader className="p-6 pb-0 flex-row items-center justify-between !gap-4">
             <div className="flex flex-col gap-1.5">
                 <DialogTitle className="flex items-center gap-2">
                   <Users className="w-5 h-5" /> Select Recipients & Schedule Batches
@@ -731,13 +755,13 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
             </div>
             {/* Buttons moved to Header */}
             <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setIsContactSelectionOpen(false)} disabled={sending} size="sm">
+                <Button variant="outline" onClick={() => setIsContactSelectionOpen(false)} disabled={schedulingLoading} size="sm">
                   Cancel
                 </Button>
                 <Button 
                     onClick={verifyAndSend} 
                     disabled={
-                        sending || 
+                        schedulingLoading || 
                         selectedCount === 0 || 
                         (!isTestingMode && !secretCode) ||
                         !!schedulingConflict ||
@@ -745,7 +769,7 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
                     }
                     size="sm"
                 >
-                    {sending ? (
+                    {schedulingLoading ? (
                       <><Spinner className="w-4 h-4 mr-2" /> Scheduling...</>
                     ) : (
                       `Confirm & Schedule (${selectedCount} Emails)`
@@ -791,7 +815,7 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
                             placeholder="e.g. 100"
                             value={batchSizeInput}
                             onChange={(e) => handleBatchSettingsChange(e.target.value, setBatchSizeInput)}
-                            disabled={sending}
+                            disabled={schedulingLoading}
                         />
                     </div>
 
@@ -806,7 +830,7 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
                             placeholder="e.g. 1.0"
                             value={batchDelayHoursInput}
                             onChange={(e) => handleBatchSettingsChange(e.target.value, setBatchDelayHoursInput)}
-                            disabled={sending}
+                            disabled={schedulingLoading}
                         />
                     </div>
                 </div>
@@ -829,7 +853,7 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
                             setSecretCode(e.target.value);
                             setVerificationError(null);
                           }}
-                          disabled={sending}
+                          disabled={schedulingLoading}
                         />
                         <p className="text-xs text-muted-foreground mt-1">
                           Set the <code>SEND_SECRET_CODE</code> environment variable on your server to enable security for bulk sending.
@@ -849,12 +873,28 @@ APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অং�
                 </Button>
               </div>
 
-              <Input
-                placeholder="Search by name or email..."
-                value={contactSearchTerm}
-                onChange={(e) => setContactSearchTerm(e.target.value)}
-                className="mb-4"
-              />
+              <div className="flex gap-4">
+                  <Input
+                    placeholder="Search by name or email..."
+                    value={contactSearchTerm}
+                    onChange={(e) => setContactSearchTerm(e.target.value)}
+                    className="flex-1"
+                  />
+                  {/* Company Filter Select */}
+                  <select
+                      value={companyFilter}
+                      onChange={(e) => setCompanyFilter(e.target.value)}
+                      className="px-3 py-2 rounded-md border border-input bg-background text-sm"
+                  >
+                      <option value="all">All Companies</option>
+                      {uniqueCompanies.map(company => (
+                          <option key={company} value={company}>
+                              {company}
+                          </option>
+                      ))}
+                      <option value="none">No Company Tag</option>
+                  </select>
+              </div>
 
               <ScrollArea className="h-[400px] border rounded-lg p-2">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2">

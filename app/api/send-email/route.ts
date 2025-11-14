@@ -11,11 +11,22 @@ const replaceVariables = (template: string, values: Record<string, any>) => {
 }
 
 
-// Helper function for rich-text processing (kept for consistency)
+// Helper function for rich-text processing (FIXED TO PROTECT MAILGUN VARIABLES)
 const processBodyToHtml = (content: string): string => {
   if (!content) return ''
 
   let processedBody = content
+  
+  // --- FIX START: Temporarily replace Mailgun variables to protect them ---
+  // This prevents rich-text formatting (like bolding) from wrapping or altering the {{...}} tags.
+  const variablePlaceholders = new Map<string, string>();
+  // Match {{...}} variables
+  processedBody = processedBody.replace(/(\{\{.*?\}\})/g, (match) => {
+    const placeholder = `__MGVAR_${variablePlaceholders.size}__`;
+    variablePlaceholders.set(placeholder, match);
+    return placeholder;
+  });
+  // --- FIX END ---
 
   // 1. Convert Bengali numbered points to H3 headings
   processedBody = processedBody.replace(
@@ -53,6 +64,12 @@ const processBodyToHtml = (content: string): string => {
   processedBody = processedBody.replace(/<br\/><h3/g, '<h3') 
   processedBody = processedBody.replace(/<\/h3><br\/>/g, '</h3>')
   
+  // --- FIX START: Restore Mailgun variables (guarantees Mailgun receives intact {{...}} tags) ---
+  variablePlaceholders.forEach((original, placeholder) => {
+      processedBody = processedBody.replace(placeholder, original);
+  });
+  // --- FIX END ---
+  
   return processedBody;
 }
 
@@ -82,19 +99,17 @@ export async function POST(request: Request) {
     const recipientVariables: { [key: string]: Record<string, any> } = {}
     
     for (const recipient of batchRecipients) {
-      // Must use recipient variable syntax in the 'to' field for Mailgun to activate it
+      // Mailgun requires name in the 'to' field for tracking and personalization
       toList.push(`${recipient.name} <${recipient.email}>`)
       
-      // Build Recipient Variables object (must contain all template variables)
+      // Build Recipient Variables object 
       recipientVariables[recipient.email] = { 
         name: recipient.name,
-        // Include custom fields so they can be resolved in the template
         ...recipient.custom_fields 
       }
     }
     
-    // 2. Process HTML Body (using the RAW template, which contains {{name}})
-    // The Mailgun API will replace the {{variables}} in the content below
+    // 2. Process HTML Body 
     const processedHtmlContent = processBodyToHtml(bodyTemplate)
 
     const htmlBody = `
@@ -116,12 +131,13 @@ export async function POST(request: Request) {
 
     const formData = new FormData()
     formData.append("from", `${fromName || "Sender"} <${fromEmail}>`)
-    formData.append("to", toList.join(",")) // Mailgun resolves variables in here
-    formData.append("subject", subjectTemplate) // Raw template subject
-    formData.append("html", htmlBody) // HTML body with {{variables}}
+    formData.append("to", toList.join(",")) // Mailgun resolves variables based on this list
+    formData.append("subject", subjectTemplate) 
+    formData.append("html", htmlBody) 
 
-    // --- CRITICAL FIX: Add Mailgun Recipient Variables Header for Personalization ---
-    formData.append("h:X-Mailgun-Recipient-Variables", JSON.stringify(recipientVariables))
+    // --- CRITICAL FIX 2: Use 'recipient-variables' form field property ---
+    // Submitting as a form field property is more robust for combined scheduling/batch features.
+    formData.append("recipient-variables", JSON.stringify(recipientVariables))
     
     // Add Mailgun Scheduling (o:delivery-time)
     const scheduledDate = new Date(scheduledDeliveryTime)
@@ -153,12 +169,10 @@ export async function POST(request: Request) {
       return Response.json({ error: `Mailgun failed to schedule batch of ${batchSize} emails. Check console for details.` }, { status: 500 })
     }
 
-    // 3. Log each email in the history table (logging the fully personalized body for history viewing)
+    // 3. Log each email in the history table
     const dbPromises = batchRecipients.map((recipient: any) => {
-        // Reconstruct fields object for replaceVariables
-        const allFields = { name: recipient.name, ...recipient.custom_fields };
-        
         // We log the *personalized* subject/body to the DB history for easier viewing
+        const allFields = { name: recipient.name, ...recipient.custom_fields };
         const personalizedSubject = replaceVariables(subjectTemplate, allFields);
         const personalizedBody = replaceVariables(bodyTemplate, allFields);
 

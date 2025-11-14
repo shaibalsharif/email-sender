@@ -22,7 +22,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
-import { Checkbox } from "@/components/ui/checkbox" // Ensure checkbox is imported
+import { Checkbox } from "@/components/ui/checkbox"
 
 interface Contact {
   email: string
@@ -62,6 +62,14 @@ export default function ContactsTab() {
   
   // State for Multi-Select/Delete
   const [selectedForDelete, setSelectedForDelete] = useState<string[]>([]);
+  
+  // New state for adding a single contact
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [newContact, setNewContact] = useState({
+      name: '',
+      email: '',
+      company: '',
+  });
 
 
   // Load contacts from API
@@ -72,6 +80,7 @@ export default function ContactsTab() {
       const response = await fetch("/api/contacts")
       if (response.ok) {
         const data = await response.json()
+        // Contacts returned from the API have custom_fields, convert to customFields
         const normalizedData: Contact[] = data.map((d: any) => ({
           email: d.email,
           name: d.name,
@@ -99,6 +108,52 @@ export default function ContactsTab() {
     loadContacts()
   }, [])
 
+  // New function for adding a single contact
+  const handleAddSingleContact = async () => {
+    if (!newContact.email || !newContact.name) {
+      setSyncStatus({ type: "error", message: "Name and Email are required." });
+      return;
+    }
+
+    const contactToAdd: Contact = {
+        name: newContact.name.trim(),
+        email: newContact.email.trim(),
+        customFields: {
+            // Only add company if it is provided
+            ...(newContact.company.trim() && { company: newContact.company.trim() }),
+        },
+    };
+
+    setSyncing(true);
+    setSyncStatus({ type: "info", message: `Attempting to add or update ${contactToAdd.email}...` });
+    setIsAddModalOpen(false);
+
+    try {
+        const response = await fetch("/api/contacts/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            // Send as an array for the bulk upsert endpoint
+            body: JSON.stringify({ contacts: [contactToAdd] }),
+        });
+
+        if (response.ok) {
+            setSyncStatus({ type: "success", message: `Successfully added or updated contact ${contactToAdd.email}.` });
+            loadContacts();
+            setNewContact({ name: '', email: '', company: '' }); // Clear form
+        } else {
+            const errorData = await response.json();
+            throw new Error(errorData.error || "Add/Update failed");
+        }
+    } catch (error) {
+        console.error("Add/Update error:", error);
+        setSyncStatus({ type: "error", message: `Failed to add contact: ${error instanceof Error ? error.message : 'Unknown error'}` });
+        setIsAddModalOpen(true); // Reopen on error
+    } finally {
+        setSyncing(false);
+        setTimeout(() => setSyncStatus(null), 5000);
+    }
+  };
+
   // Toggle selection for bulk delete
   const handleToggleSelect = (email: string, checked: boolean) => {
     setSelectedForDelete(prev => 
@@ -107,6 +162,16 @@ export default function ContactsTab() {
             : prev.filter(e => e !== email)
     );
   }
+  
+  const handleSelectAllForDelete = (checked: boolean) => {
+      if (checked) {
+          const allEmails = filteredContacts.map(c => c.email);
+          setSelectedForDelete(allEmails);
+      } else {
+          setSelectedForDelete([]);
+      }
+  }
+
 
   // Handle Bulk Delete
   const handleBulkDelete = async () => {
@@ -311,6 +376,15 @@ export default function ContactsTab() {
 
       {/* Actions and Bulk Delete */}
       <div className="flex flex-wrap gap-2 items-center">
+        {/* New Add Single Contact Button */}
+        <Button variant="default" onClick={() => {
+            setSyncStatus(null);
+            setIsAddModalOpen(true);
+        }} disabled={syncing}>
+            <Users className="w-4 h-4 mr-2" />
+            Add Single Contact
+        </Button>
+        
         <label className="cursor-pointer">
           <Button variant="outline" asChild disabled={isParsing || syncing}>
             <div>
@@ -350,14 +424,26 @@ export default function ContactsTab() {
 
       {/* Contact List */}
       <div>
-        <Input
-          placeholder="Search by email or name..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="mb-4"
-          disabled={syncing}
-        />
-        {/* Changed outer div to flex/flex-wrap */}
+        <div className="flex gap-2 items-center mb-4">
+            <Input
+              placeholder="Search by email or name..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="flex-1"
+              disabled={syncing}
+            />
+            <div className="flex items-center space-x-2 flex-shrink-0">
+                <Checkbox 
+                    id="select-all" 
+                    checked={selectedForDelete.length > 0 && selectedForDelete.length === filteredContacts.length}
+                    onCheckedChange={(checked: boolean) => handleSelectAllForDelete(checked)}
+                />
+                <label htmlFor="select-all" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    Select All ({filteredContacts.length})
+                </label>
+            </div>
+        </div>
+        
         <ScrollArea className="h-96 border rounded-lg p-4">
           <div className="flex flex-wrap gap-4 p-2">
             {filteredContacts.length === 0 ? (
@@ -366,7 +452,6 @@ export default function ContactsTab() {
                 filteredContacts.map((contact) => (
                     <div 
                         key={contact.email} 
-                        // Set width to one-third minus gap for a nice grid on desktop
                         className="text-sm p-3 bg-muted rounded hover:bg-muted/80 border flex w-full sm:w-[calc(50%-8px)] lg:w-[calc(33.33%-10.66px)] items-start relative"
                     >
                         {/* Checkbox for Bulk Delete */}
@@ -468,6 +553,64 @@ export default function ContactsTab() {
               ) : (
                 `Confirm & Sync ${contactsToPreview.length} Contacts`
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* New: Add Single Contact Dialog */}
+      <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
+        <DialogContent className="max-w-md p-0">
+          <DialogHeader className="p-6 pb-0">
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="w-5 h-5" /> Add New Contact
+            </DialogTitle>
+            <DialogDescription>
+              Enter the details for a single contact. This will overwrite existing data for the same email.
+            </DialogDescription>
+          </DialogHeader>
+
+          <Separator className="mx-6" />
+
+          <div className="p-6 pt-0 space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Name <span className="text-red-500">*</span></label>
+              <Input
+                placeholder="John Doe"
+                value={newContact.name}
+                onChange={(e) => setNewContact({ ...newContact, name: e.target.value })}
+                disabled={syncing}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Email <span className="text-red-500">*</span></label>
+              <Input
+                type="email"
+                placeholder="john@example.com"
+                value={newContact.email}
+                onChange={(e) => setNewContact({ ...newContact, email: e.target.value })}
+                disabled={syncing}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Company (Custom Field)</label>
+              <Input
+                placeholder="Acme Corp"
+                value={newContact.company}
+                onChange={(e) => setNewContact({ ...newContact, company: e.target.value })}
+                disabled={syncing}
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="p-6 pt-0">
+            <Button variant="outline" onClick={() => setIsAddModalOpen(false)} disabled={syncing}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleAddSingleContact} 
+              disabled={syncing || !newContact.email || !newContact.name}>
+              {syncing ? <><Spinner className="w-4 h-4 mr-2" /> Adding...</> : "Add Contact"}
             </Button>
           </DialogFooter>
         </DialogContent>

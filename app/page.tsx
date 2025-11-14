@@ -1,3 +1,5 @@
+// shaibal-tiller/email-sender/email-sender-2c729b716bad772b42daa15e94a023a390ca7702/app/page.tsx
+
 "use client"
 
 import { useState, useEffect } from "react"
@@ -68,39 +70,43 @@ export default function EmailApp() {
           </Label>
         </div>
 
-        <div className="flex gap-2 mb-6 border-b border-border">
-          <Button
-            variant={activeTab === "config" ? "default" : "ghost"}
-            onClick={() => setActiveTab("config")}
-            className="rounded-b-none"
-          >
-            Configuration
-          </Button>
-          <Button
-            variant={activeTab === "contacts" ? "default" : "ghost"}
-            onClick={() => setActiveTab("contacts")}
-            disabled={!isConfigValid}
-            className="rounded-b-none"
-          >
-            Contacts
-          </Button>
-          <Button
-            variant={activeTab === "compose" ? "default" : "ghost"}
-            onClick={() => setActiveTab("compose")}
-            disabled={!isConfigValid}
-            className="rounded-b-none"
-          >
-            Compose
-          </Button>
-          <Button
-            variant={activeTab === "history" ? "default" : "ghost"}
-            onClick={() => setActiveTab("history")}
-            disabled={!isConfigValid}
-            className="rounded-b-none"
-          >
-            History
-          </Button>
+        {/* --- STICKY TABS START --- */}
+        <div className="sticky top-0 z-10 bg-background pb-2"> {/* Added sticky, top-0, z-10, and pb-2 for separation */}
+            <div className="flex gap-2 border-b border-border"> 
+              <Button
+                variant={activeTab === "config" ? "default" : "ghost"}
+                onClick={() => setActiveTab("config")}
+                className="rounded-b-none"
+              >
+                Configuration
+              </Button>
+              <Button
+                variant={activeTab === "contacts" ? "default" : "ghost"}
+                onClick={() => setActiveTab("contacts")}
+                disabled={!isConfigValid}
+                className="rounded-b-none"
+              >
+                Contacts
+              </Button>
+              <Button
+                variant={activeTab === "compose" ? "default" : "ghost"}
+                onClick={() => setActiveTab("compose")}
+                disabled={!isConfigValid}
+                className="rounded-b-none"
+              >
+                Compose
+              </Button>
+              <Button
+                variant={activeTab === "history" ? "default" : "ghost"}
+                onClick={() => setActiveTab("history")}
+                disabled={!isConfigValid}
+                className="rounded-b-none"
+              >
+                History
+              </Button>
+            </div>
         </div>
+        {/* --- STICKY TABS END --- */}
 
         <Card className="p-6">
           {loading ? (
