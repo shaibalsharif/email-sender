@@ -12,7 +12,6 @@ const replaceVariables = (template: string, values: Record<string, any>) => {
 
 // NEW: Convert {{variable}} syntax to Mailgun's %recipient.variable% syntax
 const convertToMailgunVariables = (template: string): string => {
-  // Use a negative lookbehind assertion to ensure we don't accidentally match existing Mailgun variables if they were used
   return template.replace(/(\{\{(\w+)\}\})(?![\s\S]*%recipient\.\w+%)/g, (_, key) => `%recipient.${key}%`)
 }
 
@@ -39,7 +38,7 @@ const processBodyToHtml = (content: string): string => {
   )
 
   // 2. Convert text blocks immediately following H3 headings into an unordered list (ul/li)
-  const listBlockRegex = /(<h3[^>]*>.*?<\/h3>\n)([^]*?)(?=(<h3[^>]*>.*?<\/h3>|\n{2,}|$))/g;
+  const listBlockRegex = /(<h3[^>]*>.*?<\/h3>\n)((?:[^\n].*\n?)+?)(?=(<h3[^>]*>.*?<\/h3>|\n{2,}|$))/g;
 
   processedBody = processedBody.replace(listBlockRegex, (match:any, header:any, content:any) => {
       content = content.trim();
@@ -77,19 +76,27 @@ const processBodyToHtml = (content: string): string => {
   return processedBody;
 }
 
+// Mailgun expects the request body to be sent as multipart/form-data for attachments and batched messages.
 export async function POST(request: Request) {
   try {
-    const { 
-      subjectTemplate, // Raw subject template (e.g., "Dear {{name}}")
-      bodyTemplate,    // Raw body template
-      batchRecipients, // An array of { email, name, custom_fields, scheduled_at }
-      imageUrl, 
-      mailgunDomain, 
-      fromEmail, 
-      fromName,
-      batchName, // NEW: Batch name for tracking
-    } = await request.json()
+    // --- STEP 1: Parse FormData from the request body ---
+    const data = await request.formData();
+    
+    // Extract text fields (must be parsed from strings)
+    const subjectTemplate = data.get('subjectTemplate') as string;
+    const bodyTemplate = data.get('bodyTemplate') as string;
+    const imageUrl = data.get('imageUrl') as string;
+    const mailgunDomain = data.get('mailgunDomain') as string;
+    const fromEmail = data.get('fromEmail') as string;
+    const fromName = data.get('fromName') as string;
+    const batchName = data.get('batchName') as string;
+    const attachmentFile = data.get('attachment') as File | null;
+    const attachmentFileName = data.get('attachmentFileName') as string | undefined;
 
+    // Parse the JSON string back into an object
+    const batchRecipients = JSON.parse(data.get('batchRecipients') as string);
+    const scheduledDeliveryTime = data.get('scheduled_at') as string;
+    
     const mailgunApiKey = process.env.MAILGUN_API_KEY
     const batchSize = batchRecipients.length
 
@@ -97,17 +104,13 @@ export async function POST(request: Request) {
       return Response.json({ error: "Missing required configuration or recipients data." }, { status: 400 })
     }
 
-    const scheduledDeliveryTime = batchRecipients[0].scheduled_at 
-    
     // 1. Prepare Mailgun Recipient Variables and 'to' list
     const toList = []
     const recipientVariables: { [key: string]: Record<string, any> } = {}
     
     for (const recipient of batchRecipients) {
-      // Mailgun requires name in the 'to' field for tracking and personalization
       toList.push(`${recipient.name} <${recipient.email}>`)
       
-      // Build Recipient Variables object 
       recipientVariables[recipient.email] = { 
         name: recipient.name,
         ...recipient.custom_fields 
@@ -138,7 +141,7 @@ export async function POST(request: Request) {
 
     const auth = Buffer.from(`api:${mailgunApiKey}`).toString("base64")
 
-    // **CRITICAL FIX START: Force RFC 2822 UTC Format**
+    // **CRITICAL FIX START: Force RFC 2822 GMT Format**
     const scheduledDate = new Date(scheduledDeliveryTime);
     
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -152,32 +155,36 @@ export async function POST(request: Request) {
     const minute = ('0' + scheduledDate.getUTCMinutes()).slice(-2);
     const second = ('0' + scheduledDate.getUTCSeconds()).slice(-2);
     
-    // Output: "Fri, 14 Oct 2011 23:10:10 +0000" (Guaranteed RFC 2822 format with UTC offset)
-    const formattedScheduledTime = `${day}, ${date} ${month} ${year} ${hour}:${minute}:${second} +0000`;
+    const formattedScheduledTime = `${day}, ${date} ${month} ${year} ${hour}:${minute}:${second} GMT`;
     // **CRITICAL FIX END**
 
-    const formData = new FormData()
-    formData.append("from", `${fromName || "Sender"} <${fromEmail}>`)
-    formData.append("to", toList.join(",")) // Mailgun resolves variables based on this list
-    formData.append("subject", mailgunSubject) // Use converted subject
-    formData.append("html", htmlBody) // Use converted body
-
-    // Submit recipient variables as a form field
-    formData.append("recipient-variables", JSON.stringify(recipientVariables))
+    const mailgunFormData = new FormData()
+    
+    // Populate required fields
+    mailgunFormData.append("from", `${fromName || "Sender"} <${fromEmail}>`)
+    mailgunFormData.append("to", toList.join(",")) 
+    mailgunFormData.append("subject", mailgunSubject) 
+    mailgunFormData.append("html", htmlBody) 
+    mailgunFormData.append("recipient-variables", JSON.stringify(recipientVariables))
+    
+    // Add Attachment if present
+    if (attachmentFile) {
+        // Mailgun requires the field name to be 'attachment'
+        mailgunFormData.append('attachment', attachmentFile, attachmentFileName || attachmentFile.name);
+    }
     
     // Add Mailgun Scheduling (o:delivery-time)
-    // Use the strictly formatted UTC time
-    formData.append("o:delivery-time", formattedScheduledTime)
+    mailgunFormData.append("o:delivery-time", formattedScheduledTime)
+    mailgunFormData.append("o:tag", batchName)
 
-    // Optional tag for tracking (Using the unique batch name)
-    formData.append("o:tag", batchName)
-
+    // --- STEP 3: Send to Mailgun ---
     const mailgunResponse = await fetch(`https://api.mailgun.net/v3/${mailgunDomain}/messages`, {
       method: "POST",
       headers: {
         Authorization: `Basic ${auth}`,
       },
-      body: formData,
+      // Do NOT set Content-Type header; fetch handles it correctly for FormData
+      body: mailgunFormData, 
     })
 
     let status = "failed"
@@ -196,7 +203,6 @@ export async function POST(request: Request) {
 
     // 3. Log each email in the history table (with ORIGINAL {{}} syntax for readability)
     const dbPromises = batchRecipients.map((recipient: any) => {
-        // We log the *personalized* subject/body to the DB history for easier viewing
         const allFields = { name: recipient.name, ...recipient.custom_fields };
         const personalizedSubject = replaceVariables(subjectTemplate, allFields);
         const personalizedBody = replaceVariables(bodyTemplate, allFields);
@@ -222,3 +228,5 @@ export async function POST(request: Request) {
     return Response.json({ error: `Failed to schedule email batch: ${error instanceof Error ? error.message : 'Unknown error'}` }, { status: 500 })
   }
 }
+
+// NOTE: The previous 'export const config = { ... }' is removed entirely.
