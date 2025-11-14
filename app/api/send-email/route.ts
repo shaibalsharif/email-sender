@@ -13,7 +13,7 @@ const replaceVariables = (template: string, values: Record<string, any>) => {
 // NEW: Convert {{variable}} syntax to Mailgun's %recipient.variable% syntax
 const convertToMailgunVariables = (template: string): string => {
   // Use a negative lookbehind assertion to ensure we don't accidentally match existing Mailgun variables if they were used
-  return template.replace(/\{\{(\w+)\}\}(?![\s\S]*%recipient\.\w+%)/g, (_, key) => `%recipient.${key}%`)
+  return template.replace(/(\{\{(\w+)\}\})(?![\s\S]*%recipient\.\w+%)/g, (_, key) => `%recipient.${key}%`)
 }
 
 // Helper function for rich-text processing (FIXED TO PROTECT MAILGUN VARIABLES)
@@ -138,6 +138,24 @@ export async function POST(request: Request) {
 
     const auth = Buffer.from(`api:${mailgunApiKey}`).toString("base64")
 
+    // **CRITICAL FIX START: Force RFC 2822 UTC Format**
+    const scheduledDate = new Date(scheduledDeliveryTime);
+    
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    const day = days[scheduledDate.getUTCDay()];
+    const date = ('0' + scheduledDate.getUTCDate()).slice(-2);
+    const month = months[scheduledDate.getUTCMonth()];
+    const year = scheduledDate.getUTCFullYear();
+    const hour = ('0' + scheduledDate.getUTCHours()).slice(-2);
+    const minute = ('0' + scheduledDate.getUTCMinutes()).slice(-2);
+    const second = ('0' + scheduledDate.getUTCSeconds()).slice(-2);
+    
+    // Output: "Fri, 14 Oct 2011 23:10:10 +0000" (Guaranteed RFC 2822 format with UTC offset)
+    const formattedScheduledTime = `${day}, ${date} ${month} ${year} ${hour}:${minute}:${second} +0000`;
+    // **CRITICAL FIX END**
+
     const formData = new FormData()
     formData.append("from", `${fromName || "Sender"} <${fromEmail}>`)
     formData.append("to", toList.join(",")) // Mailgun resolves variables based on this list
@@ -148,8 +166,7 @@ export async function POST(request: Request) {
     formData.append("recipient-variables", JSON.stringify(recipientVariables))
     
     // Add Mailgun Scheduling (o:delivery-time)
-    const scheduledDate = new Date(scheduledDeliveryTime)
-    const formattedScheduledTime = format(scheduledDate, "eee, dd MMM yyyy HH:mm:ss xx")
+    // Use the strictly formatted UTC time
     formData.append("o:delivery-time", formattedScheduledTime)
 
     // Optional tag for tracking (Using the unique batch name)
@@ -185,8 +202,8 @@ export async function POST(request: Request) {
         const personalizedBody = replaceVariables(bodyTemplate, allFields);
 
         return sql`
-          INSERT INTO email_history (recipient_email, recipient_name, subject, body, image_url, status, mailgun_message_id, scheduled_at) 
-          VALUES (${recipient.email}, ${recipient.name}, ${personalizedSubject}, ${personalizedBody}, ${imageUrl || null}, ${status}, ${messageId}, ${scheduledDate})
+          INSERT INTO email_history (recipient_email, recipient_name, subject, body, image_url, status, mailgun_message_id, scheduled_at, batch_name) 
+          VALUES (${recipient.email}, ${recipient.name}, ${personalizedSubject}, ${personalizedBody}, ${imageUrl || null}, ${status}, ${messageId}, ${scheduledDate}, ${batchName})
           RETURNING id
         `
     });
