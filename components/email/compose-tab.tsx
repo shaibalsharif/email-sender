@@ -45,7 +45,7 @@ interface ComposeTabProps {
   isTestingMode: boolean
 }
 
-const FIXED_BATCH_SIZE = 100;
+const FIXED_BATCH_SIZE = 12; // Changed from 100 to 12
 const MAX_TEST_CAMPAIGN_SIZE = 100;
 
 const ANIMALS = ["Lion", "Tiger", "Bear", "Wolf", "Eagle", "Shark", "Panda", "Koala", "Zebra", "Dolphin"];
@@ -531,7 +531,7 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
               <Package className="w-4 h-4" /> Batch Processing
             </div>
             <p className="text-sm text-muted-foreground">
-              Emails will be automatically divided into batches of <strong>{FIXED_BATCH_SIZE}</strong>. Each batch must be confirmed in the Scheduled tab with 1 hour intervals between batches.
+              Emails will be automatically divided into batches of <strong>{FIXED_BATCH_SIZE}</strong>. Each batch must be confirmed in the Scheduled tab with ~7 minute intervals between batches (to send ~100 emails/hour).
             </p>
           </Card>
         </div>
@@ -666,7 +666,7 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
               <div className="text-sm space-y-2">
                 <p><strong>Selected:</strong> {selectedCount} recipients</p>
                 <p><strong>Batches:</strong> {estimatedBatches} batches of {FIXED_BATCH_SIZE} emails</p>
-                <p className="text-muted-foreground text-xs">Each batch requires confirmation in the Scheduled tab with 1-hour intervals.</p>
+                <p className="text-muted-foreground text-xs">Each batch requires confirmation in the Scheduled tab with ~7-minute intervals.</p>
               </div>
             </Card>
 

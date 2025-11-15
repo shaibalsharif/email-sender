@@ -26,6 +26,7 @@ interface BatchGroup {
 }
 
 const AUTO_SEND_COUNTDOWN = 10;
+const BATCH_INTERVAL_MS = 7 * 60 * 1000; // 7 minutes in milliseconds
 
 export default function ScheduledTab() {
   const { toast } = useToast();
@@ -35,7 +36,7 @@ export default function ScheduledTab() {
   const [confirmBatch, setConfirmBatch] = useState<BatchGroup | null>(null);
   const [confirmCountdown, setConfirmCountdown] = useState(AUTO_SEND_COUNTDOWN);
   const [lastSentTime, setLastSentTime] = useState<number | null>(null);
-  const [hourCountdown, setHourCountdown] = useState<string>('');
+  const [intervalCountdown, setIntervalCountdown] = useState<string>('');
 
   const fetchBatches = async () => {
     setIsLoading(true);
@@ -97,26 +98,24 @@ export default function ScheduledTab() {
     fetchBatches();
   }, []);
 
-  // Hour countdown timer - updates every second
+  // Interval countdown timer - updates every second
   useEffect(() => {
     if (!lastSentTime) {
-      setHourCountdown('No batches sent yet');
+      setIntervalCountdown('No batches sent yet');
       return;
     }
 
     const interval = setInterval(() => {
       const now = Date.now();
-      const oneHour = 60 * 60 * 1000;
-      const nextAllowedTime = lastSentTime + oneHour;
+      const nextAllowedTime = lastSentTime + BATCH_INTERVAL_MS;
       const remaining = nextAllowedTime - now;
 
       if (remaining <= 0) {
-        setHourCountdown('Ready to send next batch!');
+        setIntervalCountdown('Ready to send next batch!');
       } else {
-        const hours = Math.floor(remaining / (60 * 60 * 1000));
-        const minutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
+        const minutes = Math.floor(remaining / (60 * 1000));
         const seconds = Math.floor((remaining % (60 * 1000)) / 1000);
-        setHourCountdown(`${hours > 0 ? hours + 'h ' : ''}${minutes}m ${seconds}s`);
+        setIntervalCountdown(`${minutes}m ${seconds}s`);
       }
     }, 1000);
 
@@ -141,12 +140,11 @@ export default function ScheduledTab() {
     return () => clearInterval(timer);
   }, [confirmBatch, confirmCountdown]);
 
-  // Check if ready to send (1 hour passed or no sent batches)
+  // Check if ready to send (7 minutes passed or no sent batches)
   const isReadyToSend = () => {
     if (!lastSentTime) return true;
     const now = Date.now();
-    const oneHour = 60 * 60 * 1000;
-    return (now - lastSentTime) >= oneHour;
+    return (now - lastSentTime) >= BATCH_INTERVAL_MS;
   };
 
   const executeBatch = async (batch: BatchGroup) => {
@@ -253,7 +251,7 @@ export default function ScheduledTab() {
     if (!isReadyToSend()) {
       toast({
         title: "Please Wait",
-        description: "You must wait 1 hour between batch sends.",
+        description: "You must wait 7 minutes between batch sends.",
         variant: "destructive",
       });
       return;
@@ -293,7 +291,7 @@ export default function ScheduledTab() {
         <div className="text-center space-y-4">
           <h3 className="text-2xl font-bold flex items-center justify-center gap-3 text-blue-800 dark:text-blue-200">
             <Clock className="w-8 h-8" /> 
-            1-Hour Interval Timer
+            7-Minute Interval Timer
           </h3>
           
           {confirmBatch ? (
@@ -317,7 +315,7 @@ export default function ScheduledTab() {
               ) : (
                 <>
                   <div className="text-7xl font-extrabold text-blue-600 tabular-nums">
-                    {hourCountdown}
+                    {intervalCountdown}
                   </div>
                   <p className="text-lg font-semibold text-muted-foreground">
                     until next batch can be sent
@@ -354,7 +352,7 @@ export default function ScheduledTab() {
           ) : (
             <>
               <Clock className="w-5 h-5 mr-2" />
-              Wait {hourCountdown} to Send Next Batch
+              Wait {intervalCountdown} to Send Next Batch
             </>
           )}
         </Button>
