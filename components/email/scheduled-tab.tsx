@@ -1,16 +1,13 @@
-// shaibal-tiller/email-sender/email-sender-2c729b716bad772b42daa15e94a023a390ca7702/components/email/scheduled-tab.tsx
-
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { AlertCircle, Calendar, Mail, Loader2, Play, Pause, AlertTriangle, Clock } from "lucide-react"
+import { AlertCircle, Calendar, Play, Clock, CheckCircle2, Package, RefreshCw, Users } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Spinner } from "@/components/ui/spinner"
 import { Badge } from "@/components/ui/badge"
-import { formatDistanceToNowStrict, isPast, differenceInSeconds } from 'date-fns';
 import {
   Dialog,
   DialogContent,
@@ -20,278 +17,262 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 
-interface LocalBatch {
-  batchId: string;
+interface BatchGroup {
   batchName: string;
-  scheduledAt: string;
+  batchIndex: number;
   count: number;
-  records: { id: number, recipient_email: string, subject: string, body: string, image_url: string, custom_fields: any }[];
-  status: 'scheduled' | 'paused' | 'validation_failed' | 'pending';
+  records: any[];
+  status: 'pending' | 'sent' | 'validation_failed';
 }
 
-// Timer constant for the confirmation modal
-const OVERRIDE_SECONDS = 120;
-
-const formatTimeRemaining = (futureDateString: string) => {
-    const timeRemaining = differenceInSeconds(new Date(futureDateString), new Date());
-    if (timeRemaining <= 0) {
-        return "Ready!";
-    }
-    const hours = Math.floor(timeRemaining / 3600);
-    const minutes = Math.floor((timeRemaining % 3600) / 60);
-    const seconds = timeRemaining % 60;
-    
-    return `${hours > 0 ? hours + 'h ' : ''}${minutes}m ${seconds}s`;
-}
+const AUTO_SEND_COUNTDOWN = 10;
 
 export default function ScheduledTab() {
   const { toast } = useToast();
-  const [scheduledBatches, setScheduledBatches] = useState<LocalBatch[]>([]);
+  const [batches, setBatches] = useState<BatchGroup[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isExecuting, setIsExecuting] = useState(false);
-  const [readyBatch, setReadyBatch] = useState<LocalBatch | null>(null);
-  const [timerSeconds, setTimerSeconds] = useState(OVERRIDE_SECONDS);
-  
-  // State to track time remaining for the next scheduled batch
-  const [nextBatchCountdown, setNextBatchCountdown] = useState<string>('');
+  const [confirmBatch, setConfirmBatch] = useState<BatchGroup | null>(null);
+  const [confirmCountdown, setConfirmCountdown] = useState(AUTO_SEND_COUNTDOWN);
+  const [lastSentTime, setLastSentTime] = useState<number | null>(null);
+  const [hourCountdown, setHourCountdown] = useState<string>('');
 
-
-  // --- BATCH FETCHING ---
-
-  const fetchScheduledBatches = async () => {
+  const fetchBatches = async () => {
     setIsLoading(true);
     try {
-      // NOTE: We rely on the API to correctly filter/downgrade status to 'pending' if time is past.
       const response = await fetch("/api/email-history");
       if (response.ok) {
         const data = await response.json();
         
-        // Filter for batches that are still active/schedulable/failed validation
-        const activeStatuses = ['scheduled', 'paused', 'pending', 'validation_failed'];
+        // Group by batchName and batchIndex
+        const batchMap = new Map<string, BatchGroup>();
         
-        const batches: LocalBatch[] = data.filter((g: any) => 
-            activeStatuses.includes(g.status)
-        ).map((g: any) => ({
-             ...g,
-             status: g.status as LocalBatch['status'] 
-        })).sort((a: LocalBatch, b: LocalBatch) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()); // Sort ASC
-
-        setScheduledBatches(batches);
+        data.forEach((record: any) => {
+          const key = `${record.batch_name}-${record.batch_index}`;
+          if (!batchMap.has(key)) {
+            batchMap.set(key, {
+              batchName: record.batch_name,
+              batchIndex: record.batch_index,
+              count: 0,
+              records: [],
+              status: record.status
+            });
+          }
+          const batch = batchMap.get(key)!;
+          batch.count++;
+          batch.records.push(record);
+        });
+        
+        // Convert to array and sort by batch index
+        const batchArray = Array.from(batchMap.values()).sort((a, b) => a.batchIndex - b.batchIndex);
+        
+        setBatches(batchArray);
+        
+        // Find last sent time
+        const sentBatches = batchArray.filter(b => b.status === 'sent');
+        if (sentBatches.length > 0) {
+          const lastSent = sentBatches[sentBatches.length - 1];
+          const lastSentRecord = lastSent.records.find(r => r.sent_at);
+          if (lastSentRecord) {
+            setLastSentTime(new Date(lastSentRecord.sent_at).getTime());
+          }
+        }
       } else {
-        throw new Error("Failed to fetch local scheduled batches.");
+        throw new Error("Failed to fetch batches.");
       }
     } catch (error) {
       console.error("Fetch error:", error);
       toast({
         title: "Error",
-        description: `Could not fetch scheduled batches: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        description: `Could not fetch batches: ${error instanceof Error ? error.message : 'Unknown error'}`,
         variant: "destructive",
       });
-      setScheduledBatches([]);
+      setBatches([]);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchScheduledBatches();
+    fetchBatches();
   }, []);
 
-  // --- EXECUTION / TIMER LOGIC ---
-
-  const executeBatch = async (batch: LocalBatch, isManualOverride: boolean = false) => {
-    if (isExecuting) return;
-    setIsExecuting(true);
-    setReadyBatch(null); // Close modal and stop timer
-    setTimerSeconds(OVERRIDE_SECONDS); // Reset timer
-
-    const configResponse = await fetch("/api/config");
-    const config = await configResponse.json();
-    
-    // Check validation failed status first
-    if (batch.status === 'validation_failed') {
-        toast({
-            title: "Cannot Execute",
-            description: `Batch '${batch.batchName}' failed validation. Please correct the template and reschedule the campaign.`,
-            variant: "destructive",
-        });
-        setIsExecuting(false);
-        return;
-    }
-    
-    // Prepare data for immediate execution
-    const firstRecord = batch.records[0];
-    const originalRecordIds = batch.records.map(r => r.id);
-    const recipients = batch.records.map(r => ({ 
-        email: r.recipient_email, 
-        name: r.recipient_name, 
-        custom_fields: r.records.find((rec: any) => rec.recipient_email === r.recipient_email)?.custom_fields || {} // Use records array to find full context
-    }));
-    
-    // Create a temporary FormData object for the API call
-    const formData = new FormData();
-    
-    // Attach text/json data
-    formData.append('subjectTemplate', firstRecord.subject);
-    formData.append('bodyTemplate', firstRecord.body);
-    formData.append('imageUrl', firstRecord.image_url || '');
-    formData.append('mailgunDomain', config.mailgunDomain);
-    formData.append('fromEmail', config.fromEmail);
-    formData.append('fromName', config.fromName);
-    formData.append('batchName', batch.batchName);
-    
-    formData.append('batchRecipients', JSON.stringify(recipients));
-    formData.append('originalRecordIds', JSON.stringify(originalRecordIds));
-    formData.append('scheduled_at', batch.scheduledAt); // Original scheduled time (for history update)
-
-    // Check for file attachment information
-    // NOTE: We don't have the File object in the DB. This logic assumes the *first* recipient's original data 
-    // (logged during compose) contained the file details. Since we can't reliably pass a file object from DB to here,
-    // we assume the attachment was a one-time upload and cannot be re-sent if needed.
-
-    if (isManualOverride) {
-         toast({ title: "Sending Batch", description: `Executing '${batch.batchName}' immediately...`, variant: "default" });
-    }
-
-    try {
-        // --- NOTE: We cannot re-attach the file from the DB easily. The execution will proceed without attachment. ---
-        const response = await fetch("/api/send-email", {
-            method: "POST",
-            body: formData, 
-        });
-
-        if (response.ok) {
-            toast({
-                title: "Batch Sent! 🎉",
-                description: `Batch '${batch.batchName}' sent successfully (${batch.count} emails).`,
-                variant: "success",
-            });
-            fetchScheduledBatches(); // Reload list
-        } else {
-            const errorData = await response.json();
-            throw new Error(errorData.error || "Failed to send batch.");
-        }
-    } catch (error) {
-        console.error("Execution error:", error);
-        toast({
-            title: "Execution Failed",
-            description: `Could not send batch: ${error instanceof Error ? error.message : 'Unknown error'}`,
-            variant: "destructive",
-        });
-        fetchScheduledBatches(); 
-    } finally {
-        setIsExecuting(false);
-    }
-  };
-
-  // --- PAUSE / RESUME LOGIC (Unchanged) ---
-  const togglePauseResume = async (batchId: string, currentStatus: string) => {
-    // FIX: Ensure 'pending' status is also considered for pausing
-    const newStatus = currentStatus === 'scheduled' || currentStatus === 'pending' ? 'paused' : 'scheduled';
-    
-    try {
-        // Use batchName (which is unique) for updating status
-        const response = await fetch("/api/contacts/update-status", {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ batchId, newStatus }),
-        });
-        
-        if (response.ok) {
-            toast({
-                title: `${newStatus === 'paused' ? 'Paused' : 'Resumed'}`,
-                description: `Batch ${batchId.split('-')[0]} status changed to ${newStatus}.`,
-            });
-            fetchScheduledBatches(); // Reload the list
-        } else {
-            // Log full error response for debugging
-            const errorData = await response.json(); 
-            throw new Error(errorData.error || "Failed to update batch status.");
-        }
-    } catch (error) {
-        toast({ title: 'Error', description: `Failed to update status: ${error instanceof Error ? error.message : 'Unknown error'}`, variant: 'destructive' });
-    }
-  };
-
-  // --- TIMER/POLLING EFFECTS ---
-
-  // Effect 1: Check for ready batches every second and update countdown display
+  // Hour countdown timer - updates every second
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    
-    const checkReadyBatch = () => {
-        const now = new Date().getTime();
-        
-        // Find the next scheduled batch that is NOT paused and is the earliest one.
-        const nextBatch = scheduledBatches.find(batch => 
-            (batch.status === 'scheduled' || batch.status === 'pending')
-        );
-        
-        if (nextBatch) {
-            const scheduledTime = new Date(nextBatch.scheduledAt).getTime();
-            const timeDifference = scheduledTime - now;
-
-            if (timeDifference <= 0 && !readyBatch && !isExecuting) {
-                // Batch is overdue/ready: Trigger modal
-                setReadyBatch(nextBatch);
-                setTimerSeconds(OVERRIDE_SECONDS); 
-            }
-            
-            // Update the display countdown string
-            setNextBatchCountdown(formatTimeRemaining(nextBatch.scheduledAt));
-        } else {
-            setNextBatchCountdown('Queue Empty');
-        }
-    };
-    
-    interval = setInterval(checkReadyBatch, 1000);
-    
-    // Also, fetch the schedule every 10 seconds to catch new external logging
-    const fetchInterval = setInterval(fetchScheduledBatches, 10000); 
-
-    return () => {
-        clearInterval(interval);
-        clearInterval(fetchInterval);
+    if (!lastSentTime) {
+      setHourCountdown('No batches sent yet');
+      return;
     }
-  }, [scheduledBatches, isExecuting, readyBatch]); // Depend on batch list and execution status
 
-  // Effect 2: Countdown timer for the modal
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const oneHour = 60 * 60 * 1000;
+      const nextAllowedTime = lastSentTime + oneHour;
+      const remaining = nextAllowedTime - now;
+
+      if (remaining <= 0) {
+        setHourCountdown('Ready to send next batch!');
+      } else {
+        const hours = Math.floor(remaining / (60 * 60 * 1000));
+        const minutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
+        const seconds = Math.floor((remaining % (60 * 1000)) / 1000);
+        setHourCountdown(`${hours > 0 ? hours + 'h ' : ''}${minutes}m ${seconds}s`);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [lastSentTime]);
+
+  // Auto-send countdown for confirmation modal
   useEffect(() => {
-    if (!readyBatch || timerSeconds === 0) return;
+    if (!confirmBatch || confirmCountdown === 0) return;
 
     const timer = setInterval(() => {
-        setTimerSeconds(prev => {
-            if (prev <= 1) {
-                clearInterval(timer);
-                // Auto-send if timer hits 0
-                if (readyBatch) {
-                    executeBatch(readyBatch, true);
-                }
-                return 0;
-            }
-            return prev - 1;
-        });
+      setConfirmCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          executeBatch(confirmBatch);
+          return 0;
+        }
+        return prev - 1;
+      });
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [readyBatch, timerSeconds]);
+  }, [confirmBatch, confirmCountdown]);
 
+  // Check if ready to send (1 hour passed or no sent batches)
+  const isReadyToSend = () => {
+    if (!lastSentTime) return true;
+    const now = Date.now();
+    const oneHour = 60 * 60 * 1000;
+    return (now - lastSentTime) >= oneHour;
+  };
 
-  // --- UI RENDERING ---
+  const executeBatch = async (batch: BatchGroup) => {
+    if (isExecuting) return;
+    setIsExecuting(true);
+    setConfirmBatch(null);
+    setConfirmCountdown(AUTO_SEND_COUNTDOWN);
 
-  // Filter out validated_failed and paused batches for the primary list display
-  const activeBatches = scheduledBatches.filter(b => b.status === 'scheduled' || b.status === 'paused' || b.status === 'pending');
-  const failedBatches = scheduledBatches.filter(b => b.status === 'validation_failed');
-  
-  // Find the next upcoming scheduled batch
-  const nextUp = scheduledBatches.find(b => b.status === 'scheduled' || b.status === 'pending');
+    try {
+      const configResponse = await fetch("/api/config");
+      const config = await configResponse.json();
+      
+      if (batch.status === 'validation_failed') {
+        toast({
+          title: "Cannot Execute",
+          description: `Batch ${batch.batchIndex} failed validation.`,
+          variant: "destructive",
+        });
+        setIsExecuting(false);
+        return;
+      }
+      
+      const firstRecord = batch.records[0];
+      const originalRecordIds = batch.records.map(r => r.id);
+      
+      // CRITICAL FIX: Pass recipient data with custom_fields properly
+      const recipients = batch.records.map(r => ({ 
+        email: r.recipient_email, 
+        name: r.recipient_name, 
+        custom_fields: r.custom_fields || {}
+      }));
+      
+      const formData = new FormData();
+      // CRITICAL: Pass templates, not personalized content
+      formData.append('subjectTemplate', firstRecord.subject);
+      formData.append('bodyTemplate', firstRecord.body);
+      formData.append('imageUrl', firstRecord.image_url || '');
+      formData.append('mailgunDomain', config.mailgunDomain);
+      formData.append('fromEmail', config.fromEmail);
+      formData.append('fromName', config.fromName);
+      formData.append('batchName', batch.batchName);
+      formData.append('batchRecipients', JSON.stringify(recipients));
+      formData.append('originalRecordIds', JSON.stringify(originalRecordIds));
+      
+      // Retrieve and attach file from session storage
+      const attachmentData = sessionStorage.getItem('campaignAttachment');
+      const attachmentName = sessionStorage.getItem('campaignAttachmentName');
+      
+      if (attachmentData && attachmentName) {
+        const base64Response = await fetch(attachmentData);
+        const blob = await base64Response.blob();
+        const file = new File([blob], attachmentName, { type: blob.type });
+        formData.append('attachment', file);
+        formData.append('attachmentFileName', attachmentName);
+      }
 
+      toast({ 
+        title: "Sending Batch", 
+        description: `Executing Batch ${batch.batchIndex} (${batch.count} emails)...`, 
+        variant: "default" 
+      });
+
+      const response = await fetch("/api/send-email", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (response.ok) {
+        toast({
+          title: "Batch Sent! 🎉",
+          description: `Batch ${batch.batchIndex} sent successfully (${batch.count} emails).`,
+          variant: "default",
+        });
+        setLastSentTime(Date.now());
+        fetchBatches();
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to send batch.");
+      }
+    } catch (error) {
+      console.error("Execution error:", error);
+      toast({
+        title: "Execution Failed",
+        description: `Could not send batch: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        variant: "destructive",
+      });
+      fetchBatches();
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  const handleSendClick = () => {
+    const nextBatch = batches.find(b => b.status === 'pending');
+    if (!nextBatch) {
+      toast({
+        title: "No Pending Batches",
+        description: "All batches have been sent or there are no batches to send.",
+        variant: "default",
+      });
+      return;
+    }
+
+    if (!isReadyToSend()) {
+      toast({
+        title: "Please Wait",
+        description: "You must wait 1 hour between batch sends.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setConfirmBatch(nextBatch);
+    setConfirmCountdown(AUTO_SEND_COUNTDOWN);
+  };
+
+  const pendingBatches = batches.filter(b => b.status === 'pending');
+  const sentBatches = batches.filter(b => b.status === 'sent');
+  const failedBatches = batches.filter(b => b.status === 'validation_failed');
+  const nextBatch = pendingBatches[0];
 
   if (isLoading) {
     return (
       <div className="text-center py-8">
         <Spinner className="w-6 h-6 mx-auto mb-2" />
-        Fetching local scheduled batches...
+        Loading batches...
       </div>
     );
   }
@@ -300,155 +281,230 @@ export default function ScheduledTab() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-semibold flex items-center gap-2">
-          <Calendar className="w-5 h-5" /> Local Scheduled Batches ({activeBatches.length})
+          <Calendar className="w-5 h-5" /> Scheduled Batches ({pendingBatches.length} pending)
         </h2>
-        <Button onClick={fetchScheduledBatches} disabled={isExecuting || isLoading}>
-          <Loader2 className={`w-4 h-4 mr-2 ${isExecuting || isLoading ? 'animate-spin' : ''}`} /> Refresh List
+        <Button onClick={fetchBatches} disabled={isExecuting || isLoading} variant="outline">
+          <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} /> Refresh
         </Button>
       </div>
       
-      {/* Next Upcoming Schedule Banner */}
-      <Card className="p-4 bg-blue-50 dark:bg-blue-950/50 border-blue-300">
-        <h3 className="font-semibold text-sm mb-2 flex items-center gap-2 text-blue-800 dark:text-blue-200">
-            Next Execution
-        </h3>
-        {readyBatch ? (
-             <div className="text-lg font-bold text-red-600">
-                A batch is READY! Confirmation modal is active.
+      {/* PROMINENT COUNTDOWN TIMER */}
+      <Card className="p-6 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-950/30 dark:to-purple-950/30 border-2 border-blue-300 dark:border-blue-700">
+        <div className="text-center space-y-4">
+          <h3 className="text-2xl font-bold flex items-center justify-center gap-3 text-blue-800 dark:text-blue-200">
+            <Clock className="w-8 h-8" /> 
+            1-Hour Interval Timer
+          </h3>
+          
+          {confirmBatch ? (
+            <div className="space-y-2">
+              <div className="text-sm text-muted-foreground">Confirmation Active!</div>
+              <div className="text-6xl font-extrabold text-red-600 animate-pulse">
+                {confirmCountdown}s
+              </div>
             </div>
-        ) : (
-            <div className="text-lg font-bold">
-                {nextUp ? (
-                    <>
-                    Batch {nextUp.batchName} will be ready in: <span className="text-blue-600">{nextBatchCountdown}</span>
-                    </>
-                ) : (
-                    <div className="text-lg font-bold text-muted-foreground">
-                        Queue Empty. Schedule a new campaign.
-                    </div>
-                )}
+          ) : nextBatch ? (
+            <div className="space-y-3">
+              {isReadyToSend() ? (
+                <>
+                  <div className="text-6xl font-extrabold text-green-600">
+                    ✓ READY
+                  </div>
+                  <p className="text-lg font-semibold text-green-700 dark:text-green-300">
+                    You can send Batch #{nextBatch.batchIndex} now!
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="text-7xl font-extrabold text-blue-600 tabular-nums">
+                    {hourCountdown}
+                  </div>
+                  <p className="text-lg font-semibold text-muted-foreground">
+                    until next batch can be sent
+                  </p>
+                </>
+              )}
             </div>
-        )}
+          ) : (
+            <div className="text-3xl font-bold text-muted-foreground">
+              {batches.length === 0 ? 'No batches prepared yet' : 'All batches completed! 🎉'}
+            </div>
+          )}
+        </div>
       </Card>
 
-
-      {/* Active Batches */}
-      <Card>
-        <ScrollArea style={{ height: '400px' }}>
-          <div className="p-4 space-y-3">
-            {activeBatches.length === 0 ? (
-              <p className="text-center text-muted-foreground py-6">No active or paused batches found.</p>
-            ) : (
-              activeBatches.map((batch) => (
-                <Card 
-                    key={batch.batchId} 
-                    className={`p-3 flex justify-between items-center ${
-                        batch.status === 'paused' ? 'border-dashed border-gray-400 opacity-70' : 
-                        batch.status === 'pending' ? 'border-orange-500 border-2' : 
-                        'border-blue-500 border-2'
-                    }`}
-                >
-                  <div className="space-y-1">
-                    <div className="font-semibold">{batch.batchName} ({batch.count} emails)</div>
-                    <div className="text-sm text-muted-foreground flex items-center gap-2">
-                      <Clock className="w-4 h-4" />
-                      {batch.status === 'scheduled' || batch.status === 'pending'
-                        ? new Date(batch.scheduledAt).toLocaleString()
-                        : 'Paused'}
-                    </div>
-                    {batch.status === 'scheduled' && new Date(batch.scheduledAt).getTime() > new Date().getTime() && (
-                        <Badge variant="secondary" className="bg-blue-600">Scheduled</Badge>
-                    )}
-                    {batch.status === 'pending' && (
-                         <Badge variant="secondary" className="bg-orange-500 text-white">READY / OVERDUE</Badge>
-                    )}
-                    {batch.status === 'paused' && (
-                        <Badge variant="secondary" className="bg-gray-500 text-white">PAUSED</Badge>
-                    )}
-                  </div>
-                  
-                  <div className="flex gap-2">
-                    <Button 
-                        variant={batch.status === 'scheduled' || batch.status === 'pending' ? 'secondary' : 'default'}
-                        onClick={() => togglePauseResume(batch.batchId, batch.status)}
-                        disabled={isExecuting}
-                    >
-                        {batch.status === 'scheduled' || batch.status === 'pending' ? <Pause className="w-4 h-4 mr-2" /> : <Play className="w-4 h-4 mr-2" />}
-                        {batch.status === 'scheduled' || batch.status === 'pending' ? 'Pause' : 'Resume'}
-                    </Button>
-                    
-                    {(batch.status === 'pending' && new Date(batch.scheduledAt).getTime() < new Date().getTime()) && (
-                         <Button 
-                            variant="default" 
-                            onClick={() => setReadyBatch(batch)} // Manual immediate trigger
-                            disabled={isExecuting}
-                         >
-                            Execute Now
-                        </Button>
-                    )}
-                  </div>
-                </Card>
-              ))
-            )}
-          </div>
-        </ScrollArea>
-      </Card>
-      
-      {/* Failed Validation Batches */}
-      {failedBatches.length > 0 && (
-          <div className="space-y-3 pt-4">
-              <h3 className="text-lg font-semibold flex items-center text-red-600">
-                  <AlertTriangle className="w-5 h-5 mr-2" /> Validation Failures ({failedBatches.length})
-              </h3>
-              <Card>
-                  <ScrollArea style={{ height: '200px' }}>
-                      <div className="p-4 space-y-2">
-                          {failedBatches.map(batch => (
-                              <div key={batch.batchId} className="p-3 border border-red-500 bg-red-50 dark:bg-red-950/30 flex justify-between items-center">
-                                  <div className="space-y-1">
-                                      <div className="font-semibold">{batch.batchName}</div>
-                                      <div className="text-sm text-red-700">Needs Template Correction ({batch.count} emails affected)</div>
-                                  </div>
-                                  <Badge variant="destructive">Validation Failed</Badge>
-                              </div>
-                          ))}
-                      </div>
-                  </ScrollArea>
-              </Card>
-          </div>
+      {/* Send Next Batch Button */}
+      {nextBatch && (
+        <Button 
+          onClick={handleSendClick} 
+          disabled={isExecuting || !isReadyToSend()}
+          className="w-full h-14 text-lg"
+          size="lg"
+        >
+          {isExecuting ? (
+            <>
+              <Spinner className="w-5 h-5 mr-2" />
+              Sending Batch {nextBatch.batchIndex}...
+            </>
+          ) : isReadyToSend() ? (
+            <>
+              <Play className="w-5 h-5 mr-2" />
+              Send Batch #{nextBatch.batchIndex} Now ({nextBatch.count} emails)
+            </>
+          ) : (
+            <>
+              <Clock className="w-5 h-5 mr-2" />
+              Wait {hourCountdown} to Send Next Batch
+            </>
+          )}
+        </Button>
       )}
 
+      {/* Pending Batches */}
+      <Card>
+        <div className="p-4">
+          <h3 className="font-semibold mb-3 flex items-center gap-2">
+            <Package className="w-4 h-4" /> Pending Batches ({pendingBatches.length})
+          </h3>
+          <ScrollArea style={{ height: '300px' }}>
+            <div className="space-y-2">
+              {pendingBatches.length === 0 ? (
+                <p className="text-center text-muted-foreground py-6">No pending batches.</p>
+              ) : (
+                pendingBatches.map((batch) => (
+                  <Card key={`${batch.batchName}-${batch.batchIndex}`} className="p-3 border-orange-500 border-2">
+                    <div className="flex justify-between items-center">
+                      <div className="space-y-1">
+                        <div className="font-semibold">Batch #{batch.batchIndex}</div>
+                        <div className="text-sm text-muted-foreground">{batch.count} emails</div>
+                        <Badge variant="secondary" className="bg-orange-500 text-white">PENDING</Badge>
+                      </div>
+                      <div className="text-4xl font-bold text-orange-600">#{batch.batchIndex}</div>
+                    </div>
+                  </Card>
+                ))
+              )}
+            </div>
+          </ScrollArea>
+        </div>
+      </Card>
 
-      {/* --- EXECUTION CONFIRMATION MODAL --- */}
-      <Dialog open={!!readyBatch}>
-        <DialogContent className="sm:max-w-[425px]">
+      {/* Sent Batches */}
+      <Card>
+        <div className="p-4">
+          <h3 className="font-semibold mb-3 flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-green-600" /> Sent Batches ({sentBatches.length})
+          </h3>
+          <ScrollArea style={{ height: '200px' }}>
+            <div className="space-y-2">
+              {sentBatches.length === 0 ? (
+                <p className="text-center text-muted-foreground py-6">No batches sent yet.</p>
+              ) : (
+                sentBatches.map((batch) => {
+                  const sentRecord = batch.records.find(r => r.sent_at);
+                  return (
+                    <Card key={`${batch.batchName}-${batch.batchIndex}`} className="p-3 border-green-500 border">
+                      <div className="flex justify-between items-center">
+                        <div className="space-y-1">
+                          <div className="font-semibold">Batch #{batch.batchIndex}</div>
+                          <div className="text-sm text-muted-foreground">
+                            {batch.count} emails • Sent {sentRecord ? new Date(sentRecord.sent_at).toLocaleString() : ''}
+                          </div>
+                          <Badge variant="secondary" className="bg-green-600 text-white">SENT</Badge>
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })
+              )}
+            </div>
+          </ScrollArea>
+        </div>
+      </Card>
+
+      {/* Failed Batches */}
+      {failedBatches.length > 0 && (
+        <Card className="border-red-500">
+          <div className="p-4">
+            <h3 className="font-semibold mb-3 flex items-center gap-2 text-red-600">
+              <AlertCircle className="w-4 h-4" /> Failed Validation ({failedBatches.length})
+            </h3>
+            <ScrollArea style={{ height: '150px' }}>
+              <div className="space-y-2">
+                {failedBatches.map((batch) => (
+                  <Card key={`${batch.batchName}-${batch.batchIndex}`} className="p-3 bg-red-50 dark:bg-red-950/30 border-red-500">
+                    <div className="space-y-1">
+                      <div className="font-semibold">Batch #{batch.batchIndex}</div>
+                      <div className="text-sm text-red-700">{batch.count} emails affected</div>
+                      <Badge variant="destructive">VALIDATION FAILED</Badge>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </ScrollArea>
+          </div>
+        </Card>
+      )}
+
+      {/* Confirmation Modal WITH EMAIL/NAME MAPPING */}
+      <Dialog open={!!confirmBatch} onOpenChange={(open) => !open && setConfirmBatch(null)}>
+        <DialogContent className="sm:max-w-[600px] max-h-[80vh]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-2xl text-blue-600">
-                <AlertTriangle className="w-6 h-6" /> Batch Ready!
+              <Play className="w-6 h-6" /> Confirm Batch Send
             </DialogTitle>
             <DialogDescription>
-              The batch **{readyBatch?.batchName}** ({readyBatch?.count} emails) is due now.
-              Confirm execution or it will be sent automatically in the remaining time.
+              About to send Batch #{confirmBatch?.batchIndex} ({confirmBatch?.count} emails).
+              This will auto-send in the remaining time.
             </DialogDescription>
           </DialogHeader>
-          <div className="text-center space-y-4">
-            <div className="text-5xl font-extrabold text-red-600">
-              {timerSeconds}
+          
+          <div className="space-y-4">
+            <div className="text-center space-y-4">
+              <div className="text-6xl font-extrabold text-red-600">
+                {confirmCountdown}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Auto-send in seconds
+              </p>
             </div>
-            <p className="text-sm text-muted-foreground">
-              Auto-Override in Seconds
-            </p>
+            
+            {/* Email/Name Mapping Display */}
+            <div className="border rounded-lg p-4 bg-muted/30">
+              <div className="flex items-center gap-2 mb-3">
+                <Users className="w-4 h-4" />
+                <h4 className="font-semibold text-sm">Recipients in this batch:</h4>
+              </div>
+              <ScrollArea className="h-[200px]">
+                <div className="space-y-1 text-xs">
+                  {confirmBatch?.records.slice(0, 50).map((record, idx) => (
+                    <div key={idx} className="flex items-center gap-2 py-1 px-2 hover:bg-muted/50 rounded">
+                      <span className="font-mono text-muted-foreground">{idx + 1}.</span>
+                      <span className="font-medium">{record.recipient_name}</span>
+                      <span className="text-muted-foreground">→</span>
+                      <span className="text-muted-foreground truncate">{record.recipient_email}</span>
+                    </div>
+                  ))}
+                  {confirmBatch && confirmBatch.records.length > 50 && (
+                    <div className="text-muted-foreground text-center py-2">
+                      ... and {confirmBatch.records.length - 50} more recipients
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
           </div>
+          
           <DialogFooter>
-            <Button variant="outline" onClick={() => setReadyBatch(null)}>
-              Keep Paused (Requires Manual Resume)
+            <Button variant="outline" onClick={() => setConfirmBatch(null)}>
+              Cancel
             </Button>
             <Button 
-                onClick={() => executeBatch(readyBatch!, true)}
-                disabled={isExecuting}
+              onClick={() => confirmBatch && executeBatch(confirmBatch)}
+              disabled={isExecuting}
             >
-                {isExecuting ? <Spinner className="w-4 h-4 mr-2" /> : <Play className="w-4 h-4 mr-2" />}
-                Confirm Send Now
+              {isExecuting ? <Spinner className="w-4 h-4 mr-2" /> : <Play className="w-4 h-4 mr-2" />}
+              Send Now
             </Button>
           </DialogFooter>
         </DialogContent>
