@@ -23,10 +23,16 @@ interface BatchGroup {
   count: number;
   records: any[];
   status: 'pending' | 'sent' | 'validation_failed';
+  batchMode?: 'legacy' | 'standard';
 }
 
 const AUTO_SEND_COUNTDOWN = 10;
-const BATCH_INTERVAL_MS = 7 * 60 * 1000; // 7 minutes in milliseconds
+
+// Batch interval mapping
+const BATCH_INTERVALS = {
+  legacy: 7 * 60 * 1000, // 7 minutes
+  standard: 10 * 60 * 1000, // 10 minutes
+}
 
 export default function ScheduledTab() {
   const { toast } = useToast();
@@ -37,6 +43,7 @@ export default function ScheduledTab() {
   const [confirmCountdown, setConfirmCountdown] = useState(AUTO_SEND_COUNTDOWN);
   const [lastSentTime, setLastSentTime] = useState<number | null>(null);
   const [intervalCountdown, setIntervalCountdown] = useState<string>('');
+  const [currentBatchMode, setCurrentBatchMode] = useState<'legacy' | 'standard'>('standard');
 
   const fetchBatches = async () => {
     setIsLoading(true);
@@ -56,7 +63,8 @@ export default function ScheduledTab() {
               batchIndex: record.batch_index,
               count: 0,
               records: [],
-              status: record.status
+              status: record.status,
+              batchMode: record.batch_mode || 'legacy'
             });
           }
           const batch = batchMap.get(key)!;
@@ -69,13 +77,24 @@ export default function ScheduledTab() {
         
         setBatches(batchArray);
         
-        // Find last sent time
+        // Find last sent time and determine current batch mode
         const sentBatches = batchArray.filter(b => b.status === 'sent');
         if (sentBatches.length > 0) {
           const lastSent = sentBatches[sentBatches.length - 1];
           const lastSentRecord = lastSent.records.find(r => r.sent_at);
           if (lastSentRecord) {
             setLastSentTime(new Date(lastSentRecord.sent_at).getTime());
+          }
+          setCurrentBatchMode(lastSent.batchMode || 'standard');
+        } else {
+          // Check if there are pending batches and use their mode
+          const pendingBatches = batchArray.filter(b => b.status === 'pending');
+          if (pendingBatches.length > 0) {
+            setCurrentBatchMode(pendingBatches[0].batchMode || 'standard');
+          } else {
+            // Fall back to session storage
+            const storedMode = sessionStorage.getItem('batchMode') as 'legacy' | 'standard' | null;
+            setCurrentBatchMode(storedMode || 'standard');
           }
         }
       } else {
@@ -98,6 +117,8 @@ export default function ScheduledTab() {
     fetchBatches();
   }, []);
 
+  const currentBatchInterval = BATCH_INTERVALS[currentBatchMode];
+
   // Interval countdown timer - updates every second
   useEffect(() => {
     if (!lastSentTime) {
@@ -107,7 +128,7 @@ export default function ScheduledTab() {
 
     const interval = setInterval(() => {
       const now = Date.now();
-      const nextAllowedTime = lastSentTime + BATCH_INTERVAL_MS;
+      const nextAllowedTime = lastSentTime + currentBatchInterval;
       const remaining = nextAllowedTime - now;
 
       if (remaining <= 0) {
@@ -120,7 +141,7 @@ export default function ScheduledTab() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [lastSentTime]);
+  }, [lastSentTime, currentBatchInterval]);
 
   // Auto-send countdown for confirmation modal
   useEffect(() => {
@@ -140,11 +161,11 @@ export default function ScheduledTab() {
     return () => clearInterval(timer);
   }, [confirmBatch, confirmCountdown]);
 
-  // Check if ready to send (7 minutes passed or no sent batches)
+  // Check if ready to send
   const isReadyToSend = () => {
     if (!lastSentTime) return true;
     const now = Date.now();
-    return (now - lastSentTime) >= BATCH_INTERVAL_MS;
+    return (now - lastSentTime) >= currentBatchInterval;
   };
 
   const executeBatch = async (batch: BatchGroup) => {
@@ -170,7 +191,6 @@ export default function ScheduledTab() {
       const firstRecord = batch.records[0];
       const originalRecordIds = batch.records.map(r => r.id);
       
-      // CRITICAL FIX: Pass recipient data with custom_fields properly
       const recipients = batch.records.map(r => ({ 
         email: r.recipient_email, 
         name: r.recipient_name, 
@@ -178,7 +198,6 @@ export default function ScheduledTab() {
       }));
       
       const formData = new FormData();
-      // CRITICAL: Pass templates, not personalized content
       formData.append('subjectTemplate', firstRecord.subject);
       formData.append('bodyTemplate', firstRecord.body);
       formData.append('imageUrl', firstRecord.image_url || '');
@@ -249,9 +268,10 @@ export default function ScheduledTab() {
     }
 
     if (!isReadyToSend()) {
+      const intervalMinutes = currentBatchMode === 'legacy' ? 7 : 10;
       toast({
         title: "Please Wait",
-        description: "You must wait 7 minutes between batch sends.",
+        description: `You must wait ${intervalMinutes} minutes between batch sends.`,
         variant: "destructive",
       });
       return;
@@ -291,7 +311,7 @@ export default function ScheduledTab() {
         <div className="text-center space-y-4">
           <h3 className="text-2xl font-bold flex items-center justify-center gap-3 text-blue-800 dark:text-blue-200">
             <Clock className="w-8 h-8" /> 
-            7-Minute Interval Timer
+            {currentBatchMode === 'legacy' ? '7-Minute' : '10-Minute'} Interval Timer
           </h3>
           
           {confirmBatch ? (
@@ -375,7 +395,10 @@ export default function ScheduledTab() {
                       <div className="space-y-1">
                         <div className="font-semibold">Batch #{batch.batchIndex}</div>
                         <div className="text-sm text-muted-foreground">{batch.count} emails</div>
-                        <Badge variant="secondary" className="bg-orange-500 text-white">PENDING</Badge>
+                        <div className="flex gap-2">
+                          <Badge variant="secondary" className="bg-orange-500 text-white">PENDING</Badge>
+                          <Badge variant="outline">{batch.batchMode === 'legacy' ? 'Legacy' : 'Standard'}</Badge>
+                        </div>
                       </div>
                       <div className="text-4xl font-bold text-orange-600">#{batch.batchIndex}</div>
                     </div>
@@ -408,7 +431,10 @@ export default function ScheduledTab() {
                           <div className="text-sm text-muted-foreground">
                             {batch.count} emails • Sent {sentRecord ? new Date(sentRecord.sent_at).toLocaleString() : ''}
                           </div>
-                          <Badge variant="secondary" className="bg-green-600 text-white">SENT</Badge>
+                          <div className="flex gap-2">
+                            <Badge variant="secondary" className="bg-green-600 text-white">SENT</Badge>
+                            <Badge variant="outline">{batch.batchMode === 'legacy' ? 'Legacy' : 'Standard'}</Badge>
+                          </div>
                         </div>
                       </div>
                     </Card>

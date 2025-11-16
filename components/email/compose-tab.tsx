@@ -15,6 +15,8 @@ import {
   Users,
   Mail,
   Package,
+  Zap,
+  Clock,
 } from "lucide-react"
 import {
   Dialog,
@@ -28,6 +30,10 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/ui/spinner"
 import { Separator } from "@/components/ui/separator"
 import { useToast } from "@/hooks/use-toast"
+import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { DEFAULT_EMAIL_BODY } from "@/lib/emailBodyTemplate"
+import { Badge } from "../ui/badge"
 
 interface Contact {
   email: string
@@ -45,11 +51,26 @@ interface ComposeTabProps {
   isTestingMode: boolean
 }
 
-const FIXED_BATCH_SIZE = 12; // Changed from 100 to 12
 const MAX_TEST_CAMPAIGN_SIZE = 100;
 
 const ANIMALS = ["Lion", "Tiger", "Bear", "Wolf", "Eagle", "Shark", "Panda", "Koala", "Zebra", "Dolphin"];
 const FLOWERS = ["Rose", "Tulip", "Lily", "Daisy", "Orchid", "Jasmine", "Sunflower", "Marigold", "Lavender", "Poppy"];
+
+// Batch configuration presets
+const BATCH_PRESETS = {
+  legacy: {
+    batchSize: 12,
+    intervalMinutes: 7,
+    label: "Legacy (12 emails / 7 min)",
+    description: "Original batching system with conservative limits"
+  },
+  standard: {
+    batchSize: 200,
+    intervalMinutes: 10,
+    label: "Standard (200 emails / 10 min)",
+    description: "Recommended for most campaigns with lifted limits"
+  }
+}
 
 const getUniqueBatchName = () => {
   const animal = ANIMALS[Math.floor(Math.random() * ANIMALS.length)];
@@ -94,63 +115,8 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
   const { toast } = useToast();
 
   const [subject, setSubject] = useState("আসন্ন বাংলাদেশ ইনস্টিটিউট অব প্ল্যানার্স (BIP) নির্বাচনে আপনার মূল্যবান সমর্থন প্রত্যাশা করছি")
-  const [body, setBody] = useState(`**প্রিয় {{name}}**,
-    আসসালামু আলাইকুম। আশা করছি আপনি ভালো আছেন।
-
-
-বাংলাদেশ ইনস্টিটিউট অব প্ল্যানার্স (BIP)-কে একটি **স্বচ্ছ, জবাবদিহিমূলক, পেশাগতভাবে শক্তিশালী এবং আন্তর্জাতিকভাবে সংযুক্ত প্রতিষ্ঠান** হিসেবে গড়ে তোলার লক্ষ্য নিয়ে আমি আসন্ন নির্বাচনে **সহ-সভাপতি (VP-II)** পদে প্রার্থী হয়েছি।
-আমাদের পেশা, আমাদের প্রতিষ্ঠান এবং আমাদের সদস্যদের মর্যাদা রক্ষার জন্য আমি কিছু অগ্রাধিকারমূলক প্রতিশ্রুতি নিয়ে কাজ করতে চাই:
-
-
-১। পরিকল্পনা: মানসম্মত স্থানিক পরিকল্পনা চর্চা
-• জাতীয়–আঞ্চলিক–স্থানীয় স্তরে **Spatial Planning Framework** প্রতিষ্ঠা
-• **Land Use** ও **Zoning**-এর একীভূত সংজ্ঞা ও শ্রেণিবিন্যাস
-• পরিকল্পনার জন্য **Standard ToR, Data Specification & Methodology** নির্ধারণ
-• RAJUK, UDD, LGED ইত্যাদি সংস্থার অভিন্ন পরিকল্পনা প্রস্তুত প্রক্রিয়া
-• BBRA এর ভবন নকশা প্রক্রিয়ায় **Licensed Planners** - দের বাধ্যতামূলকভাবে অন্তর্ভুক্ত
-
-
-২। পরিকল্পনাবিদ: ক্ষমতায়ন, কল্যাণ ও পেশাগত মর্যাদা
-• নীতিনির্ধারণে পরিকল্পনাবিদদের প্রতিনিধিত্ব বৃদ্ধি
-• সরকারি (BCS) ও উন্নয়ন সংস্থায় **Planners' posts** সৃষ্টির চলমান প্রক্রিয়া অব্যাহত রাখা
-• **Welfare Fund**, আইনি সুরক্ষা ও সদস্য কল্যাণ ব্যবস্থা
--**Standard Salary Structure, Consultancy Fee Guideline** প্রণয়ন ও প্রচার
-• **Young Planners Mentorship Program** ও পেশাগত বিশেষায়ন
-• পরিকল্পনা পেশাজীবী, উন্নয়নকর্মী ও অন্যান্য পেশায় নিয়োজিত পরিকল্পনাবিদ —সব সদস্যের সমান মর্যাদা
-
-
-৩। প্রতিষ্ঠান: শক্তিশালী শাসনব্যবস্থা ও কার্যকর পরিচালনা
-• **Standing Committee, Technical Working Group** ও **Subcommittee** গঠন
-• সংগঠনের নীতি ও প্রক্রিয়ার হালনাগাদ
-• সব ভোটার তাদের পছন্দের যেকোন বৈধ মাধ্যমে ভোট দেওয়ার অধিকার রাখবে
-• আধুনিক ও কার্যকর **BIP Secretariat** গঠন
-• **Executive Committee**-এর জবাবদিহিতা সাধারণ সদস্যদের প্রতি নিশ্চিতকরণ
-সদস্যদের আরও অর্থবহ অংশগ্রহণের জন্য meet the member, কনসালটেশন ও ফিডব্যাক সিস্টেম চালু
-
-
-৪। BIP Watch: উন্নয়ন পর্যবেক্ষণ ও জনস্বার্থ রক্ষা
-• বিভিন্ন পরিকল্পনা ও প্রকল্প পর্যালোচনা ও পেশাগত মতামত
-• অনুমোদিত পরিকল্পনার সাথে অসামঞ্জস্যপূর্ণ উন্নয়ন প্রতিরোধ
-• পরিবেশ, দূষণ, অনিয়ম—এসব বিষয়ে সচেতনতা ও অ্যাডভোকেসি
-• মিডিয়ার সাথে জনস্বার্থভিত্তিক কার্যক্রম জোরদার
-
-
-৫। বৈশ্বিক সংযোগ ও জাতীয় ব্র্যান্ডিং
-• APA, RTPI, ISOCARP-এর সাথে আন্তর্জাতিক অংশীদারিত্ব
-• **Planner** পেশার জাতীয় পরিচিতি ও মর্যাদা বৃদ্ধি
-• তরুণদের **Planning Profession**-এ আকৃষ্ট করার উদ্যোগ
-
-
-আপনার সমর্থন কেন গুরুত্বপূর্ণ?
-কারণ **BIP** আমাদের সবার।সদস্যদের মতামত, অংশগ্রহণ এবং প্রত্যাশাই একটি শক্তিশালী পেশাগত কমিউনিটি গড়ে তোলে।আমি প্রতিশ্রুতি দিচ্ছি— **সদস্যদের সম্পৃক্ততা, অংশগ্রহণ, স্বচ্ছতা ও জবাবদিহিতাই হবে আমার কাজের মূল চালিকা শক্তি।**
-
-
-**আপনার মূল্যবান সমর্থন প্রত্যাশা করছি**
-আপনার মতামত, পরামর্শ বা প্রত্যাশা জানালে আমি অত্যন্ত কৃতজ্ঞ থাকবো।একটি উন্নত, শক্তিশালী এবং সদস্যকেন্দ্রিক BIP গঠনে আপনার ভোট ও সমর্থন আমার জন্য অত্যন্ত গুরুত্বপূর্ণ।
-শুভেচ্ছা ও আন্তরিক কৃতজ্ঞতাসহ,
-**তামজিদুল ইসলাম**
-প্রার্থী, সহ-সভাপতি (VP-II)
-বাংলাদেশ ইনস্টিটিউট অব প্ল্যানার্স (BIP)`)
+  const [body, setBody] = useState(DEFAULT_EMAIL_BODY)
+  const [batchMode, setBatchMode] = useState<'legacy' | 'standard'>('standard')
 
   const [contacts, setContacts] = useState<Contact[]>([])
   const [selectedContactEmails, setSelectedContactEmails] = useState<string[]>([]);
@@ -165,6 +131,8 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
   const [previewContact, setPreviewContact] = useState<Contact | null>(null)
   const [imageUrl, setImageUrl] = useState("https://38y39fcx57.ufs.sh/f/mMGqMdgQNemikJNpBtzqlJrgITZDsSjhbB7K9eUa3MdxPvqL")
   const [verificationError, setVerificationError] = useState<string | null>(null)
+
+  const currentBatchConfig = BATCH_PRESETS[batchMode];
 
   useEffect(() => {
     const loadContacts = async () => {
@@ -307,7 +275,8 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
     setVerificationError(null);
 
     const totalRecipients = recipients.length;
-    const numBatches = Math.ceil(totalRecipients / FIXED_BATCH_SIZE);
+    const batchSize = currentBatchConfig.batchSize;
+    const numBatches = Math.ceil(totalRecipients / batchSize);
     setTotalBatchCount(numBatches);
 
     const recordsToLog: any[] = [];
@@ -317,19 +286,17 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
     for (let batchIndex = 0; batchIndex < numBatches; batchIndex++) {
       setBatchProgress(batchIndex + 1);
 
-      const startIdx = batchIndex * FIXED_BATCH_SIZE;
-      const endIdx = Math.min(startIdx + FIXED_BATCH_SIZE, totalRecipients);
+      const startIdx = batchIndex * batchSize;
+      const endIdx = Math.min(startIdx + batchSize, totalRecipients);
       const batchRecipients = recipients.slice(startIdx, endIdx);
       const batchName = getUniqueBatchName();
 
-      // CRITICAL FIX: Validate each recipient individually with their own data
+      // Validate each recipient individually with their own data
       const invalidRecipients = batchRecipients.filter(r => {
-        // Create field map specific to THIS recipient
         const allFields = { name: r.name, email: r.email, ...r.custom_fields };
         const personalizedSubject = replaceVariables(subject, allFields);
         const personalizedBody = replaceVariables(body, allFields);
 
-        // Check if there are still unreplaced variables
         return personalizedSubject.match(/\{\{.*?\}\}/g) || personalizedBody.match(/\{\{.*?\}\}/g);
       });
 
@@ -339,23 +306,23 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
           ...r,
           status: 'validation_failed',
           batchName,
-          batchIndex: batchIndex + 1
+          batchIndex: batchIndex + 1,
+          batchMode
         }));
         continue;
       }
 
-      // CRITICAL FIX: Store TEMPLATES not personalized content
-      // This ensures Mailgun gets the template and personalizes it correctly
       batchRecipients.forEach(r => {
         recordsToLog.push({
           recipient: r.email,
           recipientName: r.name,
-          subject: subject, // STORE TEMPLATE
-          body: body, // STORE TEMPLATE
+          subject: subject,
+          body: body,
           custom_fields: r.custom_fields,
           status: 'pending',
           batchName,
-          batchIndex: batchIndex + 1
+          batchIndex: batchIndex + 1,
+          batchMode
         });
       });
     }
@@ -369,19 +336,20 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
           body: JSON.stringify({
             recipient: record.recipient,
             recipientName: record.recipientName,
-            subject: record.subject, // Template
-            body: record.body, // Template
+            subject: record.subject,
+            body: record.body,
             imageUrl: imageUrl,
             status: record.status,
             batchName: record.batchName,
             batchIndex: record.batchIndex,
             attachmentFileName: attachmentFile?.name || null,
+            batchMode: record.batchMode || batchMode,
           }),
         });
       });
       await Promise.all(dbPromises);
 
-      // Store attachment file in session storage for later use
+      // Store attachment and batch config in session storage
       if (attachmentFile) {
         const reader = new FileReader();
         reader.onload = () => {
@@ -390,6 +358,8 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
         };
         reader.readAsDataURL(attachmentFile);
       }
+
+      sessionStorage.setItem('batchMode', batchMode);
 
     } catch (e) {
       console.error("Failed to log records to DB:", e);
@@ -422,7 +392,7 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
 
   const isButtonDisabled = schedulingLoading || !config || !contacts.length;
   const selectedCount = selectedContactEmails.length;
-  const estimatedBatches = Math.ceil(selectedCount / FIXED_BATCH_SIZE);
+  const estimatedBatches = Math.ceil(selectedCount / currentBatchConfig.batchSize);
 
   return (
     <div className="space-y-6">
@@ -443,6 +413,47 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
           </div>
         </Card>
       )}
+
+      {/* Batch Mode Selection */}
+      <Card className="p-6 space-y-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30">
+        <div className="flex items-center gap-2">
+          <Zap className="w-5 h-5 text-blue-600" />
+          <h3 className="text-lg font-semibold">Batching Configuration</h3>
+        </div>
+
+        <RadioGroup value={batchMode} onValueChange={(v) => setBatchMode(v as 'legacy' | 'standard')}>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className={`flex items-start space-x-3 space-y-0 rounded-lg border-2 p-4 cursor-pointer transition-all ${batchMode === 'legacy' ? 'border-primary bg-primary/5' : 'border-muted hover:border-muted-foreground/50'
+              }`} onClick={() => setBatchMode('legacy')}>
+              <RadioGroupItem value="legacy" id="legacy" />
+              <Label htmlFor="legacy" className="cursor-pointer flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <Clock className="w-4 h-4" />
+                  <span className="font-semibold">{BATCH_PRESETS.legacy.label}</span>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {BATCH_PRESETS.legacy.description}
+                </p>
+              </Label>
+            </div>
+
+            <div className={`flex items-start space-x-3 space-y-0 rounded-lg border-2 p-4 cursor-pointer transition-all ${batchMode === 'standard' ? 'border-primary bg-primary/5' : 'border-muted hover:border-muted-foreground/50'
+              }`} onClick={() => setBatchMode('standard')}>
+              <RadioGroupItem value="standard" id="standard" />
+              <Label htmlFor="standard" className="cursor-pointer flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <Zap className="w-4 h-4 text-green-600" />
+                  <span className="font-semibold">{BATCH_PRESETS.standard.label}</span>
+                  <Badge variant="secondary" className="bg-green-600 text-white text-xs">Recommended</Badge>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {BATCH_PRESETS.standard.description}
+                </p>
+              </Label>
+            </div>
+          </div>
+        </RadioGroup>
+      </Card>
 
       <div className="space-y-4">
         <h2 className="text-xl font-semibold mb-2">Email Content Editor</h2>
@@ -531,7 +542,9 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
               <Package className="w-4 h-4" /> Batch Processing
             </div>
             <p className="text-sm text-muted-foreground">
-              Emails will be automatically divided into batches of <strong>{FIXED_BATCH_SIZE}</strong>. Each batch must be confirmed in the Scheduled tab with ~7 minute intervals between batches (to send ~100 emails/hour).
+              Current mode: <strong>{currentBatchConfig.label}</strong>
+              <br />
+              Emails will be divided into batches of <strong>{currentBatchConfig.batchSize}</strong> with <strong>{currentBatchConfig.intervalMinutes} minute</strong> intervals between batches.
             </p>
           </Card>
         </div>
@@ -631,7 +644,7 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
                 <Users className="w-5 h-5" /> Select Recipients
               </DialogTitle>
               <DialogDescription>
-                Select recipients. Emails will be divided into batches of {FIXED_BATCH_SIZE}.
+                Select recipients. Emails will be divided into batches of {currentBatchConfig.batchSize}.
               </DialogDescription>
             </div>
             <div className="flex gap-2">
@@ -665,8 +678,8 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
             <Card className="p-4">
               <div className="text-sm space-y-2">
                 <p><strong>Selected:</strong> {selectedCount} recipients</p>
-                <p><strong>Batches:</strong> {estimatedBatches} batches of {FIXED_BATCH_SIZE} emails</p>
-                <p className="text-muted-foreground text-xs">Each batch requires confirmation in the Scheduled tab with ~7-minute intervals.</p>
+                <p><strong>Batches:</strong> {estimatedBatches} batches of {currentBatchConfig.batchSize} emails</p>
+                <p className="text-muted-foreground text-xs">Each batch requires confirmation in the Scheduled tab with ~{currentBatchConfig.intervalMinutes}-minute intervals.</p>
               </div>
             </Card>
 

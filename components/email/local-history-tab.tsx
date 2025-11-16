@@ -6,13 +6,27 @@ import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Download, Check, Clock, X, ChevronDown, ChevronUp, Mail, Package } from "lucide-react"
+import { Download, Check, Clock, X, ChevronDown, ChevronUp, Mail, Package, RefreshCw, Play, Eye, User } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
+import { Spinner } from "@/components/ui/spinner"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import { Separator } from "@/components/ui/separator"
 
 interface EmailRecord {
   id: number;
   recipient_email: string;
   recipient_name: string;
   subject: string;
+  body: string;
+  image_url?: string;
+  custom_fields?: Record<string, any>;
   status: string;
   sent_at?: string;
   created_at: string;
@@ -35,6 +49,8 @@ interface BatchGroup {
 }
 
 const SMALL_BATCH_LIMIT = 3;
+const RETRY_COUNTDOWN = 10;
+const SMALL_PENDING_THRESHOLD = 20;
 
 const getStatusBorderColor = (status: BatchGroup['status']): string => {
   switch (status) {
@@ -48,12 +64,17 @@ const getStatusBorderColor = (status: BatchGroup['status']): string => {
 }
 
 export default function HistoryTab() {
+  const { toast } = useToast();
   const [batchGroups, setBatchGroups] = useState<BatchGroup[]>([])
   const [filteredGroups, setFilteredGroups] = useState<BatchGroup[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [isLoading, setIsLoading] = useState(true)
   const [manuallyCollapsedIds, setManuallyCollapsedIds] = useState<Set<string>>(new Set());
+  const [retryBatch, setRetryBatch] = useState<BatchGroup | null>(null);
+  const [retryCountdown, setRetryCountdown] = useState(RETRY_COUNTDOWN);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [previewEmail, setPreviewEmail] = useState<EmailRecord | null>(null);
 
   const loadHistory = async () => {
     setIsLoading(true)
@@ -151,6 +172,24 @@ export default function HistoryTab() {
     setFilteredGroups(filtered)
   }, [batchGroups, statusFilter, searchTerm])
 
+  // Auto-retry countdown
+  useEffect(() => {
+    if (!retryBatch || retryCountdown === 0) return;
+
+    const timer = setInterval(() => {
+      setRetryCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          executeRetry(retryBatch);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [retryBatch, retryCountdown]);
+
   const stats = useMemo(() => {
     const allRecords = batchGroups.flatMap(g => g.records);
     return {
@@ -192,6 +231,143 @@ export default function HistoryTab() {
     });
   };
 
+  const canRetry = (batch: BatchGroup): boolean => {
+    // Failed batches can always be retried
+    if (batch.status === 'failed') return true;
+    
+    // Small pending batches (< 20 emails) can be retried
+    if (batch.status === 'pending' && batch.count < SMALL_PENDING_THRESHOLD) return true;
+    
+    return false;
+  };
+
+  const handleRetryClick = (batch: BatchGroup) => {
+    setRetryBatch(batch);
+    setRetryCountdown(RETRY_COUNTDOWN);
+  };
+
+  const executeRetry = async (batch: BatchGroup) => {
+    if (isRetrying) return;
+    setIsRetrying(true);
+    setRetryBatch(null);
+    setRetryCountdown(RETRY_COUNTDOWN);
+
+    try {
+      const configResponse = await fetch("/api/config");
+      const config = await configResponse.json();
+      
+      const firstRecord = batch.records[0];
+      const originalRecordIds = batch.records.map(r => r.id);
+      
+      const recipients = batch.records.map(r => ({ 
+        email: r.recipient_email, 
+        name: r.recipient_name, 
+        custom_fields: r.custom_fields || {}
+      }));
+      
+      const formData = new FormData();
+      formData.append('subjectTemplate', firstRecord.subject);
+      formData.append('bodyTemplate', firstRecord.body);
+      formData.append('imageUrl', firstRecord.image_url || '');
+      formData.append('mailgunDomain', config.mailgunDomain);
+      formData.append('fromEmail', config.fromEmail);
+      formData.append('fromName', config.fromName);
+      formData.append('batchName', batch.batchName);
+      formData.append('batchRecipients', JSON.stringify(recipients));
+      formData.append('originalRecordIds', JSON.stringify(originalRecordIds));
+      
+      // Retrieve and attach file from session storage
+      const attachmentData = sessionStorage.getItem('campaignAttachment');
+      const attachmentName = sessionStorage.getItem('campaignAttachmentName');
+      
+      if (attachmentData && attachmentName) {
+        const base64Response = await fetch(attachmentData);
+        const blob = await base64Response.blob();
+        const file = new File([blob], attachmentName, { type: blob.type });
+        formData.append('attachment', file);
+        formData.append('attachmentFileName', attachmentName);
+      }
+
+      toast({ 
+        title: "Retrying Batch", 
+        description: `Sending Batch ${batch.batchIndex} (${batch.count} emails)...`, 
+        variant: "default" 
+      });
+
+      const response = await fetch("/api/send-email", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (response.ok) {
+        toast({
+          title: "Batch Sent! 🎉",
+          description: `Batch ${batch.batchIndex} sent successfully (${batch.count} emails).`,
+          variant: "default",
+        });
+        
+        // Update state locally instead of reloading
+        const now = new Date().toISOString();
+        setBatchGroups(prevGroups => 
+          prevGroups.map(group => {
+            if (group.batchName === batch.batchName && group.batchIndex === batch.batchIndex) {
+              // Update all records in this batch to 'sent'
+              const updatedRecords = group.records.map(record => ({
+                ...record,
+                status: 'sent',
+                sent_at: now
+              }));
+              
+              return {
+                ...group,
+                status: 'sent' as const,
+                records: updatedRecords,
+                sentCount: group.count,
+                failedCount: 0,
+                pendingCount: 0
+              };
+            }
+            return group;
+          })
+        );
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to send batch.");
+      }
+    } catch (error) {
+      console.error("Retry error:", error);
+      toast({
+        title: "Retry Failed",
+        description: `Could not send batch: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        variant: "destructive",
+      });
+      
+      // Update state to mark as failed
+      setBatchGroups(prevGroups => 
+        prevGroups.map(group => {
+          if (group.batchName === batch.batchName && group.batchIndex === batch.batchIndex) {
+            const updatedRecords = group.records.map(record => ({
+              ...record,
+              status: 'failed'
+            }));
+            
+            return {
+              ...group,
+              status: 'failed' as const,
+              records: updatedRecords,
+              sentCount: 0,
+              failedCount: group.count,
+              pendingCount: 0
+            };
+          }
+          return group;
+        })
+      );
+    } finally {
+      setIsRetrying(false);
+    }
+  };
+
   const handleExport = () => {
     const allRecords = filteredGroups.flatMap(g => g.records);
     
@@ -217,6 +393,51 @@ export default function HistoryTab() {
     a.href = url
     a.download = `email-history-export-${new Date().toISOString().split("T")[0]}.csv`
     a.click()
+  }
+
+  // Process email body for preview
+  const processEmailBodyForPreview = (content: string): string => {
+    if (!content) return ''
+    let rawContent = content;
+    
+    // Protect variables from processing
+    const variablePlaceholders = new Map<string, string>();
+    rawContent = rawContent.replace(/(\{\{.*?\}\})/g, (match) => {
+      const placeholder = `__VAR_${variablePlaceholders.size}__`;
+      variablePlaceholders.set(placeholder, match);
+      return placeholder;
+    });
+
+    rawContent = rawContent.replace(/^([০-৯]+\।\s*.*?)$/gm, "<h3 style='margin: 15px 0 10px; font-size: 18px; line-height: 1.2;'>$1</h3>")
+    const listBlockRegex = /(<h3[^>]*>.*?<\/h3>\n)((?:[^\n].*\n?)+?)(?=(<h3[^>]*>.*?<\/h3>|\n{2,}|$))/g;
+    rawContent = rawContent.replace(listBlockRegex, (match, header, content) => {
+      content = content.trim();
+      if (!content) return header;
+      const listItems = content.split(/\n/);
+      const listHtml = listItems.filter((item: any) => item.trim() !== '').map((item: any) => `<li>${item.trim()}</li>`).join('');
+      return `${header}<ul style="padding-left: 20px; margin: 5px 0 15px; list-style-type: disc;">${listHtml}</ul>\n`;
+    });
+    rawContent = rawContent.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    rawContent = rawContent.replace(/\n/g, "<br/>")
+    rawContent = rawContent.replace(/<br\/><h3/g, '<h3')
+    rawContent = rawContent.replace(/<\/h3><br\/>/g, '</h3>')
+    
+    // Restore variables
+    variablePlaceholders.forEach((original, placeholder) => {
+      rawContent = rawContent.replace(placeholder, original);
+    });
+    
+    return rawContent;
+  }
+
+  // Personalize content for specific recipient
+  const personalizeContent = (template: string, record: EmailRecord): string => {
+    const allFields = { 
+      name: record.recipient_name, 
+      email: record.recipient_email, 
+      ...record.custom_fields 
+    };
+    return template.replace(/\{\{(\w+)\}\}/g, (_, key) => allFields[key] || `{{${key}}}`);
   }
 
   if (isLoading) {
@@ -274,6 +495,10 @@ export default function HistoryTab() {
           <Download className="w-4 h-4 mr-2" />
           Export
         </Button>
+        <Button variant="outline" onClick={loadHistory} disabled={isLoading}>
+          <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+          Refresh
+        </Button>
       </div>
 
       <ScrollArea className="h-96 border rounded-lg">
@@ -283,6 +508,8 @@ export default function HistoryTab() {
           ) : (
             filteredGroups.map((group) => {
               const key = `${group.batchName}-${group.batchIndex}`;
+              const showRetry = canRetry(group);
+              
               return (
                 <Card 
                   key={key}
@@ -299,6 +526,25 @@ export default function HistoryTab() {
                         <div className="text-xs text-muted-foreground">{group.batchName}</div>
                       </div>
                       {getStatusBadge(group.status)}
+                      {showRetry && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRetryClick(group);
+                          }}
+                          disabled={isRetrying}
+                          className="ml-2"
+                        >
+                          {isRetrying ? (
+                            <Spinner className="w-3 h-3 mr-1" />
+                          ) : (
+                            <RefreshCw className="w-3 h-3 mr-1" />
+                          )}
+                          Retry
+                        </Button>
+                      )}
                     </div>
                     
                     <div className="flex items-center gap-4 text-xs text-muted-foreground">
@@ -343,8 +589,20 @@ export default function HistoryTab() {
                                   {record.subject}
                                 </div>
                               </div>
-                              <div className="ml-4">
+                              <div className="ml-4 flex items-center gap-2">
                                 {getStatusBadge(record.status)}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setPreviewEmail(record);
+                                  }}
+                                  className="h-7 px-2"
+                                >
+                                  <Eye className="w-3 h-3 mr-1" />
+                                  Preview
+                                </Button>
                               </div>
                             </div>
                           ))}
@@ -358,6 +616,168 @@ export default function HistoryTab() {
           )}
         </div>
       </ScrollArea>
+
+      {/* Retry Confirmation Modal */}
+      <Dialog open={!!retryBatch} onOpenChange={(open) => !open && setRetryBatch(null)}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-2xl text-blue-600">
+              <RefreshCw className="w-6 h-6" /> Confirm Batch Retry
+            </DialogTitle>
+            <DialogDescription>
+              About to retry Batch #{retryBatch?.batchIndex} ({retryBatch?.count} emails).
+              {retryBatch?.status === 'failed' && ' This batch previously failed.'}
+              {retryBatch?.status === 'pending' && ' This is a small pending batch.'}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <div className="text-center space-y-4">
+              <div className="text-6xl font-extrabold text-red-600">
+                {retryCountdown}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Auto-send in seconds
+              </p>
+            </div>
+            
+            <Card className="p-4 bg-muted/30">
+              <div className="text-sm space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Status:</span>
+                  <span className="font-semibold">{retryBatch?.status.toUpperCase()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Recipients:</span>
+                  <span className="font-semibold">{retryBatch?.count} emails</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Batch:</span>
+                  <span className="font-semibold">#{retryBatch?.batchIndex}</span>
+                </div>
+              </div>
+            </Card>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRetryBatch(null)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={() => retryBatch && executeRetry(retryBatch)}
+              disabled={isRetrying}
+            >
+              {isRetrying ? <Spinner className="w-4 h-4 mr-2" /> : <Play className="w-4 h-4 mr-2" />}
+              Send Now
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Email Preview Modal */}
+      <Dialog open={!!previewEmail} onOpenChange={(open) => !open && setPreviewEmail(null)}>
+        <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-[90vw] p-0">
+          <DialogHeader className="p-6 pb-0">
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="w-5 h-5" /> Email Preview
+            </DialogTitle>
+            <DialogDescription>
+              Preview of the email as sent/scheduled for the recipient
+            </DialogDescription>
+          </DialogHeader>
+
+          <Separator className="mx-6" />
+
+          <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+            {previewEmail && (
+              <>
+                {/* Recipient Info Card */}
+                <Card className="p-4 space-y-3 bg-muted/50">
+                  <div className="flex items-center gap-2 text-sm">
+                    <User className="w-4 h-4 text-muted-foreground" />
+                    <span className="font-medium">
+                      {previewEmail.recipient_name} &lt;{previewEmail.recipient_email}&gt;
+                    </span>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4 pt-3 border-t text-xs">
+                    <div>
+                      <div className="text-muted-foreground">Status:</div>
+                      <div className="font-semibold mt-1">
+                        {getStatusBadge(previewEmail.status)}
+                      </div>
+                    </div>
+                    {previewEmail.sent_at && (
+                      <div>
+                        <div className="text-muted-foreground">Sent At:</div>
+                        <div className="font-semibold mt-1">
+                          {new Date(previewEmail.sent_at).toLocaleString()}
+                        </div>
+                      </div>
+                    )}
+                    {previewEmail.batch_name && (
+                      <div>
+                        <div className="text-muted-foreground">Batch:</div>
+                        <div className="font-semibold mt-1">
+                          {previewEmail.batch_name} #{previewEmail.batch_index}
+                        </div>
+                      </div>
+                    )}
+                    {previewEmail.mailgun_message_id && (
+                      <div className="col-span-2">
+                        <div className="text-muted-foreground">Message ID:</div>
+                        <div className="font-mono text-xs mt-1 truncate">
+                          {previewEmail.mailgun_message_id}
+                        </div>
+                      </div>
+                    )}
+                    <div>
+                      <div className="text-muted-foreground">Created At:</div>
+                      <div className="font-semibold mt-1">
+                        {new Date(previewEmail.created_at).toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t pt-3">
+                    <div className="text-xs text-muted-foreground">Subject:</div>
+                    <div className="font-semibold mt-1">
+                      {personalizeContent(previewEmail.subject, previewEmail)}
+                    </div>
+                  </div>
+                </Card>
+
+                {/* Email Body Preview */}
+                <Card className="p-4 space-y-3 bg-white dark:bg-slate-950 border">
+                  <div className="text-xs text-muted-foreground mb-2">Email Body (Personalized):</div>
+                  <div
+                    className="text-sm"
+                    dangerouslySetInnerHTML={{
+                      __html: processEmailBodyForPreview(personalizeContent(previewEmail.body, previewEmail)),
+                    }}
+                  />
+                  {previewEmail.image_url && (
+                    <div className="pt-3 border-t">
+                      <img
+                        src={previewEmail.image_url}
+                        alt="Email image"
+                        className="w-full h-auto max-h-[400px] object-contain"
+                        onError={(e) => (e.currentTarget.style.display = 'none')}
+                      />
+                    </div>
+                  )}
+                </Card>
+              </>
+            )}
+          </div>
+
+          <DialogFooter className="p-6 pt-0">
+            <Button variant="outline" onClick={() => setPreviewEmail(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
