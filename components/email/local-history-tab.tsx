@@ -462,63 +462,66 @@ export default function HistoryTab() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold mb-4">Email History (By Batch)</h2>
-        <div className="grid grid-cols-5 gap-4 mb-6">
-          <Card className="p-4">
-            <div className="text-2xl font-bold">{stats.total}</div>
-            <div className="text-xs text-muted-foreground">Total Emails</div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-2xl font-bold text-green-600">{stats.sent}</div>
-            <div className="text-xs text-muted-foreground">Sent</div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-2xl font-bold text-orange-600">{stats.pending}</div>
-            <div className="text-xs text-muted-foreground">Pending</div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-2xl font-bold text-red-600">{stats.failed}</div>
-            <div className="text-xs text-muted-foreground">Failed</div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-2xl font-bold text-red-800">{stats.validation_failed}</div>
-            <div className="text-xs text-muted-foreground">Validation Failed</div>
-          </Card>
+    <div className="space-y-6 bg-black">
+      <div className="sticky z-10 top-[5vh] bg-black pb-2">
+        <div >
+          <h2 className="text-xl font-semibold mb-4">Email History (By Batch)</h2>
+          <div className="grid grid-cols-5 gap-4 mb-6">
+            <Card className="p-4">
+              <div className="text-2xl font-bold">{stats.total}</div>
+              <div className="text-xs text-muted-foreground">Total Emails</div>
+            </Card>
+            <Card className="p-4">
+              <div className="text-2xl font-bold text-green-600">{stats.sent}</div>
+              <div className="text-xs text-muted-foreground">Sent</div>
+            </Card>
+            <Card className="p-4">
+              <div className="text-2xl font-bold text-orange-600">{stats.pending}</div>
+              <div className="text-xs text-muted-foreground">Pending</div>
+            </Card>
+            <Card className="p-4">
+              <div className="text-2xl font-bold text-red-600">{stats.failed}</div>
+              <div className="text-xs text-muted-foreground">Failed</div>
+            </Card>
+            <Card className="p-4">
+              <div className="text-2xl font-bold text-red-800">{stats.validation_failed}</div>
+              <div className="text-xs text-muted-foreground">Validation Failed</div>
+            </Card>
+          </div>
+        </div>
+
+        <div className="flex gap-2 flex-wrap">
+          <Input
+            placeholder="Search batch name or recipient..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="flex-1 min-w-64"
+          />
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-3 py-2 rounded-lg border border-input bg-background"
+          >
+            <option value="all">All Status</option>
+            <option value="sent">Sent</option>
+            <option value="pending">Pending</option>
+            <option value="failed">Failed</option>
+            <option value="validation_failed">Validation Failed</option>
+            <option value="mixed">Mixed</option>
+          </select>
+          <Button variant="outline" onClick={handleExport} disabled={filteredGroups.length === 0}>
+            <Download className="w-4 h-4 mr-2" />
+            Export
+          </Button>
+          <Button variant="outline" onClick={loadHistory} disabled={isLoading}>
+            <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
         </div>
       </div>
 
-      <div className="flex gap-2 flex-wrap">
-        <Input
-          placeholder="Search batch name or recipient..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="flex-1 min-w-64"
-        />
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-2 rounded-lg border border-input bg-background"
-        >
-          <option value="all">All Status</option>
-          <option value="sent">Sent</option>
-          <option value="pending">Pending</option>
-          <option value="failed">Failed</option>
-          <option value="validation_failed">Validation Failed</option>
-          <option value="mixed">Mixed</option>
-        </select>
-        <Button variant="outline" onClick={handleExport} disabled={filteredGroups.length === 0}>
-          <Download className="w-4 h-4 mr-2" />
-          Export
-        </Button>
-        <Button variant="outline" onClick={loadHistory} disabled={isLoading}>
-          <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
-      </div>
 
-      <ScrollArea className="h-96 border rounded-lg">
+      <ScrollArea className="h-full border rounded-lg">
         <div className="p-4 space-y-3">
           {filteredGroups.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">No history found matching current filters.</div>

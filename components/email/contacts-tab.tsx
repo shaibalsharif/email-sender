@@ -368,7 +368,7 @@ export default function ContactsTab() {
       {/* Guide Card */}
       <Card className="p-4 bg-muted/50 border-muted-foreground/20">
         <div className="flex gap-2 mb-3">
-          <Info className="w-5 h-5 flex-shrink-0 text-muted-foreground" />
+          <Info className="w-5 h-5 shrink-0 text-muted-foreground" />
           <div className="text-sm">
             <p className="font-medium mb-2">CSV Structure Guide</p>
             <p className="text-xs text-muted-foreground mb-2">Your CSV file must have at least these columns:</p>
@@ -435,7 +435,7 @@ export default function ContactsTab() {
 
       {/* Contact List */}
       <div>
-        <div className="flex gap-2 items-center mb-4">
+        <div className="flex gap-2 items-center mb-4 sticky top-[5vh] z-10 bg-black py-4">
           <Input
             placeholder="Search by email or name..."
             value={searchTerm}
@@ -443,7 +443,7 @@ export default function ContactsTab() {
             className="flex-1"
             disabled={syncing}
           />
-          <div className="flex items-center space-x-2 flex-shrink-0">
+          <div className="flex items-center space-x-2 shrink-0">
             <Checkbox
               id="select-all"
               checked={selectedForDelete.length > 0 && selectedForDelete.length === filteredContacts.length}
@@ -455,7 +455,7 @@ export default function ContactsTab() {
           </div>
         </div>
 
-        <ScrollArea className="h-96 border rounded-lg p-4">
+        <ScrollArea className="h-full border rounded-lg p-4">
           <div className="flex flex-wrap gap-4 p-2">
             {filteredContacts.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground w-full">No contacts found. Upload a CSV or sync data.</div>
@@ -466,7 +466,7 @@ export default function ContactsTab() {
                   className="text-sm p-3 bg-muted rounded hover:bg-muted/80 border flex w-full sm:w-[calc(50%-8px)] lg:w-[calc(33.33%-10.66px)] items-start relative"
                 >
                   {/* Checkbox for Bulk Delete */}
-                  <div className="flex-shrink-0 pt-1 mr-3">
+                  <div className="shrink-0 pt-1 mr-3">
                     <Checkbox
                       checked={selectedForDelete.includes(contact.email)}
                       onCheckedChange={(checked: boolean) => handleToggleSelect(contact.email, checked)}

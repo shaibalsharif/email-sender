@@ -90,7 +90,7 @@ export default function ConfigTab({ onConfigSaved }: ConfigTabProps) {
       {isFromEnv && (
         <Card className="p-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800">
           <div className="flex gap-3">
-            <Lock className="w-5 h-5 flex-shrink-0 text-blue-600 dark:text-blue-400 mt-0.5" />
+            <Lock className="w-5 h-5 shrink-0 text-blue-600 dark:text-blue-400 mt-0.5" />
             <div className="text-sm">
               <p className="font-medium text-blue-900 dark:text-blue-100 mb-2">Environment Variables Detected</p>
               <p className="text-blue-800 dark:text-blue-200 text-xs">
@@ -105,7 +105,7 @@ export default function ConfigTab({ onConfigSaved }: ConfigTabProps) {
       {!isFromEnv && (
         <Card className="p-4 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800">
           <div className="flex gap-3">
-            <AlertTriangle className="w-5 h-5 flex-shrink-0 text-amber-600 dark:text-amber-500 mt-0.5" />
+            <AlertTriangle className="w-5 h-5 shrink-0 text-amber-600 dark:text-amber-500 mt-0.5" />
             <div className="text-sm">
               <p className="font-medium text-amber-900 dark:text-amber-100 mb-2">Note: API Key Not Stored</p>
               <p className="text-amber-800 dark:text-amber-200 text-xs">
