@@ -25,6 +25,9 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog"
+
+import { useSecretVerification } from "@/components/security/use-secret-verification"
+
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/ui/spinner"
@@ -131,6 +134,7 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
   const [previewContact, setPreviewContact] = useState<Contact | null>(null)
   const [imageUrl, setImageUrl] = useState("https://38y39fcx57.ufs.sh/f/mMGqMdgQNemikJNpBtzqlJrgITZDsSjhbB7K9eUa3MdxPvqL")
   const [verificationError, setVerificationError] = useState<string | null>(null)
+  const { requireVerification, VerificationDialog } = useSecretVerification()
 
   const currentBatchConfig = BATCH_PRESETS[batchMode];
 
@@ -264,67 +268,80 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
   };
 
   const prepareBatches = async () => {
-    const recipients = contactsToSchedule.filter(c => selectedContactEmails.includes(c.email));
+    const recipients = contactsToSchedule.filter((c) => selectedContactEmails.includes(c.email))
+
 
     if (recipients.length === 0) {
-      setVerificationError("No recipients selected for scheduling.");
-      return;
+      setVerificationError("No recipients selected for scheduling.")
+      return
     }
+    setVerificationError(null)
 
-    setSchedulingLoading(true);
-    setVerificationError(null);
 
-    const totalRecipients = recipients.length;
-    const batchSize = currentBatchConfig.batchSize;
-    const numBatches = Math.ceil(totalRecipients / batchSize);
-    setTotalBatchCount(numBatches);
+    const ok = await requireVerification({ actionLabel: `schedule ${recipients.length} emails to Local History` })
+    if (!ok) {
+      return
+    }
+    setSchedulingLoading(true)
 
-    const recordsToLog: any[] = [];
-    let validationFailedCount = 0;
+    const totalRecipients = recipients.length
+    const batchSize = currentBatchConfig.batchSize
+    const numBatches = Math.ceil(totalRecipients / batchSize)
+    setTotalBatchCount(numBatches)
+
+    const recordsToLog: any[] = []
+    let validationFailedCount = 0
 
     // Prepare all batches
     for (let batchIndex = 0; batchIndex < numBatches; batchIndex++) {
-      setBatchProgress(batchIndex + 1);
+      setBatchProgress(batchIndex + 1)
 
-      const startIdx = batchIndex * batchSize;
-      const endIdx = Math.min(startIdx + batchSize, totalRecipients);
-      const batchRecipients = recipients.slice(startIdx, endIdx);
-      const batchName = getUniqueBatchName();
+      const startIdx = batchIndex * batchSize
+      const endIdx = Math.min(startIdx + batchSize, totalRecipients)
+      const batchRecipients = recipients.slice(startIdx, endIdx)
+      const batchName = getUniqueBatchName()
 
-      // Validate each recipient individually with their own data
-      const invalidRecipients = batchRecipients.filter(r => {
-        const allFields = { name: r.name, email: r.email, ...r.custom_fields };
-        const personalizedSubject = replaceVariables(subject, allFields);
-        const personalizedBody = replaceVariables(body, allFields);
+      const invalidRecipients = batchRecipients.filter((r) => {
+        const allFields = { name: r.name, email: r.email, ...r.custom_fields }
+        const personalizedSubject = replaceVariables(subject, allFields)
+        const personalizedBody = replaceVariables(body, allFields)
 
-        return personalizedSubject.match(/\{\{.*?\}\}/g) || personalizedBody.match(/\{\{.*?\}\}/g);
-      });
+
+        return (
+          personalizedSubject.match(/\{\{.*?\}\}/g) ||
+          personalizedBody.match(/\{\{.*?\}\}/g)
+        )
+      })
+
 
       if (invalidRecipients.length > 0) {
-        validationFailedCount += invalidRecipients.length;
-        batchRecipients.forEach(r => recordsToLog.push({
-          ...r,
-          status: 'validation_failed',
-          batchName,
-          batchIndex: batchIndex + 1,
-          batchMode
-        }));
-        continue;
+        validationFailedCount += invalidRecipients.length
+        batchRecipients.forEach((r) =>
+          recordsToLog.push({
+            ...r,
+            status: "validation_failed",
+            batchName,
+            batchIndex: batchIndex + 1,
+            batchMode,
+          }),
+        )
+        continue
       }
 
-      batchRecipients.forEach(r => {
+
+      batchRecipients.forEach((r) => {
         recordsToLog.push({
           recipient: r.email,
           recipientName: r.name,
           subject: subject,
           body: body,
           custom_fields: r.custom_fields,
-          status: 'pending',
+          status: "pending",
           batchName,
           batchIndex: batchIndex + 1,
-          batchMode
-        });
-      });
+          batchMode,
+        })
+      })
     }
 
     // Log all records to database
@@ -345,32 +362,36 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
             attachmentFileName: attachmentFile?.name || null,
             batchMode: record.batchMode || batchMode,
           }),
-        });
-      });
-      await Promise.all(dbPromises);
+        })
+      })
+
+
+      await Promise.all(dbPromises)
+
 
       // Store attachment and batch config in session storage
       if (attachmentFile) {
-        const reader = new FileReader();
+        const reader = new FileReader()
         reader.onload = () => {
-          sessionStorage.setItem('campaignAttachment', reader.result as string);
-          sessionStorage.setItem('campaignAttachmentName', attachmentFile.name);
-        };
-        reader.readAsDataURL(attachmentFile);
+          sessionStorage.setItem("campaignAttachment", reader.result as string)
+          sessionStorage.setItem("campaignAttachmentName", attachmentFile.name)
+        }
+        reader.readAsDataURL(attachmentFile)
       }
 
-      sessionStorage.setItem('batchMode', batchMode);
-
+      sessionStorage.setItem("batchMode", batchMode)
     } catch (e) {
-      console.error("Failed to log records to DB:", e);
+      console.error("Failed to log records to DB:", e)
       toast({
         title: "DB Error",
         description: "Could not log all records to Local History.",
-        variant: "destructive"
-      });
+        variant: "destructive",
+      })
     }
 
-    setSchedulingLoading(false);
+
+    setSchedulingLoading(false)
+
 
     if (validationFailedCount > 0) {
       toast({
@@ -388,6 +409,7 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
     });
 
     setIsContactSelectionOpen(false);
+
   }
 
   const isButtonDisabled = schedulingLoading || !config || !contacts.length;
@@ -437,7 +459,8 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
               </Label>
             </div>
 
-            <div className={`flex items-start space-x-3 space-y-0 rounded-lg border-2 p-4 cursor-pointer transition-all ${batchMode === 'standard' ? 'border-primary bg-primary/5' : 'border-muted hover:border-muted-foreground/50'
+            <div className={`flex items-start space-x-3 space-y-0 rounded-lg border-2 p-4 cursor-pointer transition-all 
+            ${batchMode === 'standard' ? 'border-primary bg-primary/5' : 'border-muted hover:border-muted-foreground/50'
               }`} onClick={() => setBatchMode('standard')}>
               <RadioGroupItem value="standard" id="standard" />
               <Label htmlFor="standard" className="cursor-pointer flex-1">
@@ -544,7 +567,8 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
             <p className="text-sm text-muted-foreground">
               Current mode: <strong>{currentBatchConfig.label}</strong>
               <br />
-              Emails will be divided into batches of <strong>{currentBatchConfig.batchSize}</strong> with <strong>{currentBatchConfig.intervalMinutes} minute</strong> intervals between batches.
+              Emails will be divided into batches of <strong>{currentBatchConfig.batchSize}</strong>
+              with <strong>{currentBatchConfig.intervalMinutes} minute</strong> intervals between batches.
             </p>
           </Card>
         </div>
@@ -679,7 +703,8 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
               <div className="text-sm space-y-2">
                 <p><strong>Selected:</strong> {selectedCount} recipients</p>
                 <p><strong>Batches:</strong> {estimatedBatches} batches of {currentBatchConfig.batchSize} emails</p>
-                <p className="text-muted-foreground text-xs">Each batch requires confirmation in the Scheduled tab with ~{currentBatchConfig.intervalMinutes}-minute intervals.</p>
+                <p className="text-muted-foreground text-xs">Each batch requires confirmation in the Scheduled tab with
+                  ~{currentBatchConfig.intervalMinutes}-minute intervals.</p>
               </div>
             </Card>
 
@@ -746,6 +771,7 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
           </div>
         </DialogContent>
       </Dialog>
+      {VerificationDialog}
     </div>
   )
 }

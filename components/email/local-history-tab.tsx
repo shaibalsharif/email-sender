@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge"
 import { Download, Check, Clock, X, ChevronDown, ChevronUp, Mail, Package, RefreshCw, Play, Eye, User } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Spinner } from "@/components/ui/spinner"
+import { useSecretVerification } from "@/components/security/use-secret-verification"
+
 import {
   Dialog,
   DialogContent,
@@ -75,6 +77,7 @@ export default function HistoryTab() {
   const [retryCountdown, setRetryCountdown] = useState(RETRY_COUNTDOWN);
   const [isRetrying, setIsRetrying] = useState(false);
   const [previewEmail, setPreviewEmail] = useState<EmailRecord | null>(null);
+  const { requireVerification, VerificationDialog } = useSecretVerification()
 
   const loadHistory = async () => {
     setIsLoading(true)
@@ -82,15 +85,15 @@ export default function HistoryTab() {
       const response = await fetch("/api/email-history")
       if (response.ok) {
         const data: EmailRecord[] = await response.json();
-        
+
         // Group by batch_name and batch_index
         const batchMap = new Map<string, BatchGroup>();
-        
+
         data.forEach((record) => {
           const batchName = record.batch_name || 'No-Batch';
           const batchIndex = record.batch_index || 0;
           const key = `${batchName}-${batchIndex}`;
-          
+
           if (!batchMap.has(key)) {
             batchMap.set(key, {
               batchName,
@@ -104,21 +107,21 @@ export default function HistoryTab() {
               createdAt: record.created_at
             });
           }
-          
+
           const batch = batchMap.get(key)!;
           batch.count++;
           batch.records.push(record);
-          
+
           // Count statuses
           if (record.status === 'sent') batch.sentCount++;
           else if (record.status === 'failed') batch.failedCount++;
           else if (record.status === 'pending') batch.pendingCount++;
         });
-        
+
         // Determine overall batch status
         const batches = Array.from(batchMap.values()).map(batch => {
           let status: BatchGroup['status'] = 'pending';
-          
+
           if (batch.sentCount === batch.count) {
             status = 'sent';
           } else if (batch.failedCount === batch.count) {
@@ -128,13 +131,13 @@ export default function HistoryTab() {
           } else if (batch.records.some(r => r.status === 'validation_failed')) {
             status = 'validation_failed';
           }
-          
+
           return { ...batch, status };
         });
-        
+
         // Sort by batch_index (ascending)
         batches.sort((a, b) => a.batchIndex - b.batchIndex);
-        
+
         setBatchGroups(batches);
       } else {
         setBatchGroups([])
@@ -146,7 +149,7 @@ export default function HistoryTab() {
       setIsLoading(false)
     }
   }
-  
+
   useEffect(() => {
     loadHistory()
   }, [])
@@ -162,7 +165,7 @@ export default function HistoryTab() {
       filtered = filtered.filter(
         (g) =>
           g.batchName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          g.records.some(r => 
+          g.records.some(r =>
             r.recipient_email.toLowerCase().includes(searchTerm.toLowerCase()) ||
             r.recipient_name.toLowerCase().includes(searchTerm.toLowerCase())
           )
@@ -200,7 +203,7 @@ export default function HistoryTab() {
       validation_failed: allRecords.filter((h) => h.status === "validation_failed").length,
     }
   }, [batchGroups])
-  
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'sent': return <Badge variant="default" className="bg-green-500 hover:bg-green-600">Sent</Badge>;
@@ -211,7 +214,7 @@ export default function HistoryTab() {
       default: return <Badge variant="outline">{status}</Badge>;
     }
   }
-  
+
   const isGroupExpanded = (key: string, count: number) => {
     if (count <= SMALL_BATCH_LIMIT) return true;
     return !manuallyCollapsedIds.has(key);
@@ -219,7 +222,7 @@ export default function HistoryTab() {
 
   const handleToggleExpand = (key: string, count: number) => {
     if (count <= SMALL_BATCH_LIMIT) return;
-    
+
     setManuallyCollapsedIds(prev => {
       const newSet = new Set(prev);
       if (newSet.has(key)) {
@@ -234,10 +237,10 @@ export default function HistoryTab() {
   const canRetry = (batch: BatchGroup): boolean => {
     // Failed batches can always be retried
     if (batch.status === 'failed') return true;
-    
+
     // Small pending batches (< 20 emails) can be retried
     if (batch.status === 'pending' && batch.count < SMALL_PENDING_THRESHOLD) return true;
-    
+
     return false;
   };
 
@@ -246,131 +249,141 @@ export default function HistoryTab() {
     setRetryCountdown(RETRY_COUNTDOWN);
   };
 
+
+
   const executeRetry = async (batch: BatchGroup) => {
-    if (isRetrying) return;
-    setIsRetrying(true);
-    setRetryBatch(null);
-    setRetryCountdown(RETRY_COUNTDOWN);
+    if (isRetrying) return
+    const ok = await requireVerification({ actionLabel: `retry batch #${batch.batchIndex}` })
+    if (!ok) {
+      setRetryBatch(null)
+      setRetryCountdown(RETRY_COUNTDOWN)
+      return
+    }
+    setIsRetrying(true)
+    setRetryBatch(null)
+    setRetryCountdown(RETRY_COUNTDOWN)
 
     try {
-      const configResponse = await fetch("/api/config");
-      const config = await configResponse.json();
-      
-      const firstRecord = batch.records[0];
-      const originalRecordIds = batch.records.map(r => r.id);
-      
-      const recipients = batch.records.map(r => ({ 
-        email: r.recipient_email, 
-        name: r.recipient_name, 
-        custom_fields: r.custom_fields || {}
-      }));
-      
-      const formData = new FormData();
-      formData.append('subjectTemplate', firstRecord.subject);
-      formData.append('bodyTemplate', firstRecord.body);
-      formData.append('imageUrl', firstRecord.image_url || '');
-      formData.append('mailgunDomain', config.mailgunDomain);
-      formData.append('fromEmail', config.fromEmail);
-      formData.append('fromName', config.fromName);
-      formData.append('batchName', batch.batchName);
-      formData.append('batchRecipients', JSON.stringify(recipients));
-      formData.append('originalRecordIds', JSON.stringify(originalRecordIds));
-      
+      const configResponse = await fetch("/api/config")
+      const config = await configResponse.json()
+
+      const firstRecord = batch.records[0]
+      const originalRecordIds = batch.records.map((r) => r.id)
+
+      const recipients = batch.records.map((r) => ({
+        email: r.recipient_email,
+        name: r.recipient_name,
+        custom_fields: r.custom_fields || {},
+      }))
+
+      const formData = new FormData()
+      formData.append("subjectTemplate", firstRecord.subject)
+      formData.append("bodyTemplate", firstRecord.body)
+      formData.append("imageUrl", firstRecord.image_url || "")
+      formData.append("mailgunDomain", config.mailgunDomain)
+      formData.append("fromEmail", config.fromEmail)
+      formData.append("fromName", config.fromName)
+      formData.append("batchName", batch.batchName)
+      formData.append("batchRecipients", JSON.stringify(recipients))
+      formData.append("originalRecordIds", JSON.stringify(originalRecordIds))
+
       // Retrieve and attach file from session storage
-      const attachmentData = sessionStorage.getItem('campaignAttachment');
-      const attachmentName = sessionStorage.getItem('campaignAttachmentName');
-      
+      const attachmentData = sessionStorage.getItem("campaignAttachment")
+      const attachmentName = sessionStorage.getItem("campaignAttachmentName")
+
       if (attachmentData && attachmentName) {
-        const base64Response = await fetch(attachmentData);
-        const blob = await base64Response.blob();
-        const file = new File([blob], attachmentName, { type: blob.type });
-        formData.append('attachment', file);
-        formData.append('attachmentFileName', attachmentName);
+        const base64Response = await fetch(attachmentData)
+        const blob = await base64Response.blob()
+        const file = new File([blob], attachmentName, { type: blob.type })
+        formData.append("attachment", file)
+        formData.append("attachmentFileName", attachmentName)
       }
 
-      toast({ 
-        title: "Retrying Batch", 
-        description: `Sending Batch ${batch.batchIndex} (${batch.count} emails)...`, 
-        variant: "default" 
-      });
+
+      toast({
+        title: "Retrying Batch",
+        description: `Sending Batch ${batch.batchIndex} (${batch.count} emails)...`,
+        variant: "default",
+      })
 
       const response = await fetch("/api/send-email", {
         method: "POST",
         body: formData,
-      });
+      })
 
       if (response.ok) {
         toast({
           title: "Batch Sent! 🎉",
           description: `Batch ${batch.batchIndex} sent successfully (${batch.count} emails).`,
           variant: "default",
-        });
-        
+        })
+
         // Update state locally instead of reloading
-        const now = new Date().toISOString();
-        setBatchGroups(prevGroups => 
-          prevGroups.map(group => {
+        const now = new Date().toISOString()
+        setBatchGroups((prevGroups) =>
+          prevGroups.map((group) => {
             if (group.batchName === batch.batchName && group.batchIndex === batch.batchIndex) {
-              // Update all records in this batch to 'sent'
-              const updatedRecords = group.records.map(record => ({
+              const updatedRecords = group.records.map((record) => ({
                 ...record,
-                status: 'sent',
-                sent_at: now
-              }));
-              
+                status: "sent",
+                sent_at: now,
+              }))
+
+
               return {
                 ...group,
-                status: 'sent' as const,
+                status: "sent" as const,
                 records: updatedRecords,
                 sentCount: group.count,
                 failedCount: 0,
-                pendingCount: 0
-              };
+                pendingCount: 0,
+              }
             }
-            return group;
-          })
-        );
+            return group
+          }),
+        )
       } else {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to send batch.");
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to send batch.")
       }
     } catch (error) {
-      console.error("Retry error:", error);
+      console.error("Retry error:", error)
       toast({
         title: "Retry Failed",
-        description: `Could not send batch: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        description: `Could not send batch: ${error instanceof Error ? error.message : "Unknown error"}`,
         variant: "destructive",
-      });
-      
+      })
+
       // Update state to mark as failed
-      setBatchGroups(prevGroups => 
-        prevGroups.map(group => {
+      setBatchGroups((prevGroups) =>
+        prevGroups.map((group) => {
           if (group.batchName === batch.batchName && group.batchIndex === batch.batchIndex) {
-            const updatedRecords = group.records.map(record => ({
+            const updatedRecords = group.records.map((record) => ({
               ...record,
-              status: 'failed'
-            }));
-            
+              status: "failed",
+            }))
+
+
             return {
               ...group,
-              status: 'failed' as const,
+              status: "failed" as const,
               records: updatedRecords,
               sentCount: 0,
               failedCount: group.count,
-              pendingCount: 0
-            };
+              pendingCount: 0,
+            }
           }
-          return group;
-        })
-      );
+          return group
+        }),
+      )
     } finally {
-      setIsRetrying(false);
+      setIsRetrying(false)
     }
-  };
+  }
 
   const handleExport = () => {
     const allRecords = filteredGroups.flatMap(g => g.records);
-    
+
     const csv = [
       ["Batch Name", "Batch Index", "Email", "Name", "Subject", "Status", "Sent At", "Created At"],
       ...allRecords.map((r) => [
@@ -399,7 +412,7 @@ export default function HistoryTab() {
   const processEmailBodyForPreview = (content: string): string => {
     if (!content) return ''
     let rawContent = content;
-    
+
     // Protect variables from processing
     const variablePlaceholders = new Map<string, string>();
     rawContent = rawContent.replace(/(\{\{.*?\}\})/g, (match) => {
@@ -421,24 +434,28 @@ export default function HistoryTab() {
     rawContent = rawContent.replace(/\n/g, "<br/>")
     rawContent = rawContent.replace(/<br\/><h3/g, '<h3')
     rawContent = rawContent.replace(/<\/h3><br\/>/g, '</h3>')
-    
+
     // Restore variables
     variablePlaceholders.forEach((original, placeholder) => {
       rawContent = rawContent.replace(placeholder, original);
     });
-    
+
     return rawContent;
   }
 
   // Personalize content for specific recipient
   const personalizeContent = (template: string, record: EmailRecord): string => {
-    const allFields = { 
-      name: record.recipient_name, 
-      email: record.recipient_email, 
-      ...record.custom_fields 
+    const allFields: Record<string, any> = {
+      name: record.recipient_name,
+      email: record.recipient_email,
+      ...(record.custom_fields || {})
     };
-    return template.replace(/\{\{(\w+)\}\}/g, (_, key) => allFields[key] || `{{${key}}}`);
-  }
+
+    return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+      return allFields[key] ?? `{{${key}}}`;
+    });
+  };
+
 
   if (isLoading) {
     return <div className="text-center py-8">Loading history...</div>
@@ -509,13 +526,13 @@ export default function HistoryTab() {
             filteredGroups.map((group) => {
               const key = `${group.batchName}-${group.batchIndex}`;
               const showRetry = canRetry(group);
-              
+
               return (
-                <Card 
+                <Card
                   key={key}
                   className={`p-0 border-2 ${getStatusBorderColor(group.status)}`}
                 >
-                  <div 
+                  <div
                     className={`p-3 ${group.count > SMALL_BATCH_LIMIT ? 'cursor-pointer hover:bg-muted/70' : 'bg-muted/30'} flex justify-between items-center`}
                     onClick={() => handleToggleExpand(key, group.count)}
                   >
@@ -546,7 +563,7 @@ export default function HistoryTab() {
                         </Button>
                       )}
                     </div>
-                    
+
                     <div className="flex items-center gap-4 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <Check className="w-3 h-3 text-green-600" /> {group.sentCount}
@@ -558,26 +575,26 @@ export default function HistoryTab() {
                         <X className="w-3 h-3 text-red-600" /> {group.failedCount}
                       </span>
                       <span className="font-bold">Total: {group.count}</span>
-                      
+
                       <div className="flex items-center gap-1">
                         <Clock className="w-3 h-3" />
                         {new Date(group.createdAt).toLocaleString()}
                       </div>
-                      
+
                       {group.count > SMALL_BATCH_LIMIT && (
-                        isGroupExpanded(key, group.count) ? 
-                          <ChevronUp className="w-4 h-4" /> : 
+                        isGroupExpanded(key, group.count) ?
+                          <ChevronUp className="w-4 h-4" /> :
                           <ChevronDown className="w-4 h-4" />
                       )}
                     </div>
                   </div>
-                  
+
                   {isGroupExpanded(key, group.count) && (
                     <div className="border-t bg-background/50">
                       <ScrollArea className={group.count > 10 ? "h-40" : ""}>
                         <div className="divide-y">
                           {group.records.map((record) => (
-                            <div 
+                            <div
                               key={record.id}
                               className="py-2 px-4 text-sm flex justify-between items-center hover:bg-secondary/50"
                             >
@@ -630,7 +647,7 @@ export default function HistoryTab() {
               {retryBatch?.status === 'pending' && ' This is a small pending batch.'}
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4">
             <div className="text-center space-y-4">
               <div className="text-6xl font-extrabold text-red-600">
@@ -640,7 +657,7 @@ export default function HistoryTab() {
                 Auto-send in seconds
               </p>
             </div>
-            
+
             <Card className="p-4 bg-muted/30">
               <div className="text-sm space-y-2">
                 <div className="flex justify-between">
@@ -658,12 +675,12 @@ export default function HistoryTab() {
               </div>
             </Card>
           </div>
-          
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setRetryBatch(null)}>
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={() => retryBatch && executeRetry(retryBatch)}
               disabled={isRetrying}
             >
@@ -699,7 +716,7 @@ export default function HistoryTab() {
                       {previewEmail.recipient_name} &lt;{previewEmail.recipient_email}&gt;
                     </span>
                   </div>
-                  
+
                   <div className="grid grid-cols-2 gap-4 pt-3 border-t text-xs">
                     <div>
                       <div className="text-muted-foreground">Status:</div>
@@ -778,6 +795,7 @@ export default function HistoryTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {VerificationDialog}
     </div>
   )
 }

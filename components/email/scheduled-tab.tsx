@@ -16,6 +16,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
+import { useSecretVerification } from "@/components/security/use-secret-verification"
 
 interface BatchGroup {
   batchName: string;
@@ -44,6 +45,7 @@ export default function ScheduledTab() {
   const [lastSentTime, setLastSentTime] = useState<number | null>(null);
   const [intervalCountdown, setIntervalCountdown] = useState<string>('');
   const [currentBatchMode, setCurrentBatchMode] = useState<'legacy' | 'standard'>('standard');
+  const { requireVerification, VerificationDialog } = useSecretVerification()
 
   const fetchBatches = async () => {
     setIsLoading(true);
@@ -51,10 +53,10 @@ export default function ScheduledTab() {
       const response = await fetch("/api/email-history");
       if (response.ok) {
         const data = await response.json();
-        
+
         // Group by batchName and batchIndex
         const batchMap = new Map<string, BatchGroup>();
-        
+
         data.forEach((record: any) => {
           const key = `${record.batch_name}-${record.batch_index}`;
           if (!batchMap.has(key)) {
@@ -71,12 +73,12 @@ export default function ScheduledTab() {
           batch.count++;
           batch.records.push(record);
         });
-        
+
         // Convert to array and sort by batch index
         const batchArray = Array.from(batchMap.values()).sort((a, b) => a.batchIndex - b.batchIndex);
-        
+
         setBatches(batchArray);
-        
+
         // Find last sent time and determine current batch mode
         const sentBatches = batchArray.filter(b => b.status === 'sent');
         if (sentBatches.length > 0) {
@@ -169,92 +171,102 @@ export default function ScheduledTab() {
   };
 
   const executeBatch = async (batch: BatchGroup) => {
-    if (isExecuting) return;
-    setIsExecuting(true);
-    setConfirmBatch(null);
-    setConfirmCountdown(AUTO_SEND_COUNTDOWN);
+    if (isExecuting) return
+
+    const ok = await requireVerification({ actionLabel: `send scheduled batch #${batch.batchIndex}` })
+    if (!ok) {
+      setConfirmBatch(null)
+      setConfirmCountdown(AUTO_SEND_COUNTDOWN)
+      return
+    }
+
+    setIsExecuting(true)
+    setConfirmBatch(null)
+    setConfirmCountdown(AUTO_SEND_COUNTDOWN)
+
 
     try {
-      const configResponse = await fetch("/api/config");
-      const config = await configResponse.json();
-      
-      if (batch.status === 'validation_failed') {
+      const configResponse = await fetch("/api/config")
+      const config = await configResponse.json()
+
+      if (batch.status === "validation_failed") {
         toast({
           title: "Cannot Execute",
           description: `Batch ${batch.batchIndex} failed validation.`,
           variant: "destructive",
-        });
-        setIsExecuting(false);
-        return;
-      }
-      
-      const firstRecord = batch.records[0];
-      const originalRecordIds = batch.records.map(r => r.id);
-      
-      const recipients = batch.records.map(r => ({ 
-        email: r.recipient_email, 
-        name: r.recipient_name, 
-        custom_fields: r.custom_fields || {}
-      }));
-      
-      const formData = new FormData();
-      formData.append('subjectTemplate', firstRecord.subject);
-      formData.append('bodyTemplate', firstRecord.body);
-      formData.append('imageUrl', firstRecord.image_url || '');
-      formData.append('mailgunDomain', config.mailgunDomain);
-      formData.append('fromEmail', config.fromEmail);
-      formData.append('fromName', config.fromName);
-      formData.append('batchName', batch.batchName);
-      formData.append('batchRecipients', JSON.stringify(recipients));
-      formData.append('originalRecordIds', JSON.stringify(originalRecordIds));
-      
-      // Retrieve and attach file from session storage
-      const attachmentData = sessionStorage.getItem('campaignAttachment');
-      const attachmentName = sessionStorage.getItem('campaignAttachmentName');
-      
-      if (attachmentData && attachmentName) {
-        const base64Response = await fetch(attachmentData);
-        const blob = await base64Response.blob();
-        const file = new File([blob], attachmentName, { type: blob.type });
-        formData.append('attachment', file);
-        formData.append('attachmentFileName', attachmentName);
+        })
+        setIsExecuting(false)
+        return
       }
 
-      toast({ 
-        title: "Sending Batch", 
-        description: `Executing Batch ${batch.batchIndex} (${batch.count} emails)...`, 
-        variant: "default" 
-      });
+      const firstRecord = batch.records[0]
+      const originalRecordIds = batch.records.map((r) => r.id)
+
+      const recipients = batch.records.map((r) => ({
+        email: r.recipient_email,
+        name: r.recipient_name,
+        custom_fields: r.custom_fields || {},
+      }))
+
+      const formData = new FormData()
+      formData.append("subjectTemplate", firstRecord.subject)
+      formData.append("bodyTemplate", firstRecord.body)
+      formData.append("imageUrl", firstRecord.image_url || "")
+      formData.append("mailgunDomain", config.mailgunDomain)
+      formData.append("fromEmail", config.fromEmail)
+      formData.append("fromName", config.fromName)
+      formData.append("batchName", batch.batchName)
+      formData.append("batchRecipients", JSON.stringify(recipients))
+      formData.append("originalRecordIds", JSON.stringify(originalRecordIds))
+
+
+      // Retrieve and attach file from session storage
+      const attachmentData = sessionStorage.getItem("campaignAttachment")
+      const attachmentName = sessionStorage.getItem("campaignAttachmentName")
+
+      if (attachmentData && attachmentName) {
+        const base64Response = await fetch(attachmentData)
+        const blob = await base64Response.blob()
+        const file = new File([blob], attachmentName, { type: blob.type })
+        formData.append("attachment", file)
+        formData.append("attachmentFileName", attachmentName)
+      }
+
+      toast({
+        title: "Sending Batch",
+        description: `Executing Batch ${batch.batchIndex} (${batch.count} emails)...`,
+        variant: "default",
+      })
 
       const response = await fetch("/api/send-email", {
         method: "POST",
         body: formData,
-      });
+      })
 
       if (response.ok) {
         toast({
           title: "Batch Sent! 🎉",
           description: `Batch ${batch.batchIndex} sent successfully (${batch.count} emails).`,
           variant: "default",
-        });
-        setLastSentTime(Date.now());
-        fetchBatches();
+        })
+        setLastSentTime(Date.now())
+        fetchBatches()
       } else {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to send batch.");
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to send batch.")
       }
     } catch (error) {
-      console.error("Execution error:", error);
+      console.error("Execution error:", error)
       toast({
         title: "Execution Failed",
-        description: `Could not send batch: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        description: `Could not send batch: ${error instanceof Error ? error.message : "Unknown error"}`,
         variant: "destructive",
-      });
-      fetchBatches();
+      })
+      fetchBatches()
     } finally {
-      setIsExecuting(false);
+      setIsExecuting(false)
     }
-  };
+  }
 
   const handleSendClick = () => {
     const nextBatch = batches.find(b => b.status === 'pending');
@@ -305,15 +317,15 @@ export default function ScheduledTab() {
           <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} /> Refresh
         </Button>
       </div>
-      
+
       {/* PROMINENT COUNTDOWN TIMER */}
       <Card className="p-6 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-950/30 dark:to-purple-950/30 border-2 border-blue-300 dark:border-blue-700">
         <div className="text-center space-y-4">
           <h3 className="text-2xl font-bold flex items-center justify-center gap-3 text-blue-800 dark:text-blue-200">
-            <Clock className="w-8 h-8" /> 
+            <Clock className="w-8 h-8" />
             {currentBatchMode === 'legacy' ? '7-Minute' : '10-Minute'} Interval Timer
           </h3>
-          
+
           {confirmBatch ? (
             <div className="space-y-2">
               <div className="text-sm text-muted-foreground">Confirmation Active!</div>
@@ -353,8 +365,8 @@ export default function ScheduledTab() {
 
       {/* Send Next Batch Button */}
       {nextBatch && (
-        <Button 
-          onClick={handleSendClick} 
+        <Button
+          onClick={handleSendClick}
           disabled={isExecuting || !isReadyToSend()}
           className="w-full h-14 text-lg"
           size="lg"
@@ -482,7 +494,7 @@ export default function ScheduledTab() {
               This will auto-send in the remaining time.
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4">
             <div className="text-center space-y-4">
               <div className="text-6xl font-extrabold text-red-600">
@@ -492,7 +504,7 @@ export default function ScheduledTab() {
                 Auto-send in seconds
               </p>
             </div>
-            
+
             {/* Email/Name Mapping Display */}
             <div className="border rounded-lg p-4 bg-muted/30">
               <div className="flex items-center gap-2 mb-3">
@@ -518,12 +530,12 @@ export default function ScheduledTab() {
               </ScrollArea>
             </div>
           </div>
-          
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmBatch(null)}>
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={() => confirmBatch && executeBatch(confirmBatch)}
               disabled={isExecuting}
             >
@@ -533,6 +545,7 @@ export default function ScheduledTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {VerificationDialog}
     </div>
   );
 }

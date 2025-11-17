@@ -24,6 +24,8 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Checkbox } from "@/components/ui/checkbox"
 
+import { useSecretVerification } from "@/components/security/use-secret-verification"
+
 interface Contact {
   email: string
   name: string
@@ -35,18 +37,18 @@ interface Contact {
 
 // Helper to generate sample data
 const generateSampleContacts = () => {
-    const contacts: Contact[] = []
-    for (let i = 1; i <= 100; i++) {
-      contacts.push({
-        email: `user${i}@example.com`,
-        name: `User ${i}`,
-        customFields: { company: `Company ${Math.ceil(i / 10)}` },
-        sent_count: Math.floor(Math.random() * 5),
-        pending_count: Math.floor(Math.random() * 2),
-        failed_count: Math.floor(Math.random() * 1),
-      })
-    }
-    return contacts
+  const contacts: Contact[] = []
+  for (let i = 1; i <= 100; i++) {
+    contacts.push({
+      email: `user${i}@example.com`,
+      name: `User ${i}`,
+      customFields: { company: `Company ${Math.ceil(i / 10)}` },
+      sent_count: Math.floor(Math.random() * 5),
+      pending_count: Math.floor(Math.random() * 2),
+      failed_count: Math.floor(Math.random() * 1),
+    })
+  }
+  return contacts
 }
 
 
@@ -59,16 +61,18 @@ export default function ContactsTab() {
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
   const [contactsToPreview, setContactsToPreview] = useState<Contact[]>([])
   const [isParsing, setIsParsing] = useState(false)
-  
+
+  const { requireVerification, VerificationDialog } = useSecretVerification()
+
   // State for Multi-Select/Delete
   const [selectedForDelete, setSelectedForDelete] = useState<string[]>([]);
-  
+
   // New state for adding a single contact
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newContact, setNewContact] = useState({
-      name: '',
-      email: '',
-      company: '',
+    name: '',
+    email: '',
+    company: '',
   });
 
 
@@ -116,12 +120,12 @@ export default function ContactsTab() {
     }
 
     const contactToAdd: Contact = {
-        name: newContact.name.trim(),
-        email: newContact.email.trim(),
-        customFields: {
-            // Only add company if it is provided
-            ...(newContact.company.trim() && { company: newContact.company.trim() }),
-        },
+      name: newContact.name.trim(),
+      email: newContact.email.trim(),
+      customFields: {
+        // Only add company if it is provided
+        ...(newContact.company.trim() && { company: newContact.company.trim() }),
+      },
     };
 
     setSyncing(true);
@@ -129,93 +133,100 @@ export default function ContactsTab() {
     setIsAddModalOpen(false);
 
     try {
-        const response = await fetch("/api/contacts/sync", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            // Send as an array for the bulk upsert endpoint
-            body: JSON.stringify({ contacts: [contactToAdd] }),
-        });
+      const response = await fetch("/api/contacts/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // Send as an array for the bulk upsert endpoint
+        body: JSON.stringify({ contacts: [contactToAdd] }),
+      });
 
-        if (response.ok) {
-            setSyncStatus({ type: "success", message: `Successfully added or updated contact ${contactToAdd.email}.` });
-            loadContacts();
-            setNewContact({ name: '', email: '', company: '' }); // Clear form
-        } else {
-            const errorData = await response.json();
-            throw new Error(errorData.error || "Add/Update failed");
-        }
+      if (response.ok) {
+        setSyncStatus({ type: "success", message: `Successfully added or updated contact ${contactToAdd.email}.` });
+        loadContacts();
+        setNewContact({ name: '', email: '', company: '' }); // Clear form
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Add/Update failed");
+      }
     } catch (error) {
-        console.error("Add/Update error:", error);
-        setSyncStatus({ type: "error", message: `Failed to add contact: ${error instanceof Error ? error.message : 'Unknown error'}` });
-        setIsAddModalOpen(true); // Reopen on error
+      console.error("Add/Update error:", error);
+      setSyncStatus({ type: "error", message: `Failed to add contact: ${error instanceof Error ? error.message : 'Unknown error'}` });
+      setIsAddModalOpen(true); // Reopen on error
     } finally {
-        setSyncing(false);
-        setTimeout(() => setSyncStatus(null), 5000);
+      setSyncing(false);
+      setTimeout(() => setSyncStatus(null), 5000);
     }
   };
 
   // Toggle selection for bulk delete
   const handleToggleSelect = (email: string, checked: boolean) => {
-    setSelectedForDelete(prev => 
-        checked 
-            ? [...prev, email] 
-            : prev.filter(e => e !== email)
+    setSelectedForDelete(prev =>
+      checked
+        ? [...prev, email]
+        : prev.filter(e => e !== email)
     );
   }
-  
+
   const handleSelectAllForDelete = (checked: boolean) => {
-      if (checked) {
-          const allEmails = filteredContacts.map(c => c.email);
-          setSelectedForDelete(allEmails);
-      } else {
-          setSelectedForDelete([]);
-      }
+    if (checked) {
+      const allEmails = filteredContacts.map(c => c.email);
+      setSelectedForDelete(allEmails);
+    } else {
+      setSelectedForDelete([]);
+    }
   }
 
 
   // Handle Bulk Delete
   const handleBulkDelete = async () => {
-    if (selectedForDelete.length === 0) return;
+    if (selectedForDelete.length === 0) return
     if (!confirm(`Are you sure you want to permanently delete ${selectedForDelete.length} contacts from the database? This cannot be undone.`)) {
-        return;
+      return
+    }
+    const ok = await requireVerification({ actionLabel: `delete ${selectedForDelete.length} contacts` })
+    if (!ok) {
+      return
     }
 
-    setSyncing(true);
-    setSyncStatus({ type: "info", message: `Starting deletion of ${selectedForDelete.length} contacts...` });
-
-    let deletedCount = 0;
+    setSyncing(true)
+    setSyncStatus({ type: "info", message: `Starting deletion of ${selectedForDelete.length} contacts...` })
+    let deletedCount = 0
     try {
-        for (const email of selectedForDelete) {
-            const response = await fetch("/api/contacts", {
-                method: "DELETE",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email }),
-            });
+      for (const email of selectedForDelete) {
+        const response = await fetch("/api/contacts", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        })
 
-            if (response.ok) {
-                deletedCount++;
-            } else {
-                console.error(`Failed to delete ${email}`);
-            }
-        }
-        
-        if (deletedCount > 0) {
-            setSyncStatus({ type: "success", message: `Successfully deleted ${deletedCount} contacts.` });
-            loadContacts(); // Reloads data and clears selection
+
+        if (response.ok) {
+          deletedCount++
         } else {
-            setSyncStatus({ type: "error", message: "No contacts were successfully deleted." });
+          console.error(`Failed to delete ${email}`)
         }
-        
+      }
+
+
+      if (deletedCount > 0) {
+        setSyncStatus({ type: "success", message: `Successfully deleted ${deletedCount} contacts.` })
+        loadContacts()
+      } else {
+        setSyncStatus({ type: "error", message: "No contacts were successfully deleted." })
+      }
     } catch (error) {
-        console.error("Bulk delete error:", error);
-        setSyncStatus({ type: "error", message: `Failed to complete bulk deletion: ${error instanceof Error ? error.message : 'Unknown error'}` });
+      console.error("Bulk delete error:", error)
+      setSyncStatus({
+        type: "error",
+        message: `Failed to complete bulk deletion: ${error instanceof Error ? error.message : "Unknown error"}`,
+      })
     } finally {
-        setSyncing(false);
-        setSelectedForDelete([]);
-        setTimeout(() => setSyncStatus(null), 5000);
+      setSyncing(false)
+      setSelectedForDelete([])
+      setTimeout(() => setSyncStatus(null), 5000)
     }
   }
-  
+
   // Remaining Handlers (same logic as previous versions)
 
   const handleCsvUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -238,7 +249,7 @@ export default function ContactsTab() {
               .filter((k) => k !== "email" && k !== "name" && row[k])
               .reduce((acc: any, k) => ({ ...acc, [k]: row[k] }), {}),
           }))
-          
+
         setIsParsing(false);
         setContactsToPreview(parsed);
         setIsPreviewModalOpen(true);
@@ -252,20 +263,20 @@ export default function ContactsTab() {
   }
 
   const handleConfirmSync = async () => {
-    setIsPreviewModalOpen(false); 
-    
+    setIsPreviewModalOpen(false);
+
     if (contactsToPreview.length === 0) {
-        setSyncStatus({ type: "info", message: "Preview list is empty, nothing to sync." });
-        return;
+      setSyncStatus({ type: "info", message: "Preview list is empty, nothing to sync." });
+      return;
     }
-    
+
     await handleSyncToDb(contactsToPreview);
   }
 
   const handleSyncToDb = async (contactsToSync: Contact[] = contacts) => {
     if (contactsToSync.length === 0) {
-        setSyncStatus({ type: "info", message: "Contact list is empty. Nothing to synchronize." });
-        return;
+      setSyncStatus({ type: "info", message: "Contact list is empty. Nothing to synchronize." });
+      return;
     }
 
     setSyncing(true)
@@ -296,9 +307,9 @@ export default function ContactsTab() {
 
   const handleDownload = () => {
     const csv = Papa.unparse(contacts.map(c => ({
-        email: c.email,
-        name: c.name,
-        ...c.customFields 
+      email: c.email,
+      name: c.name,
+      ...c.customFields
     })))
     const blob = new Blob([csv], { type: "text/csv" })
     const url = window.URL.createObjectURL(blob)
@@ -310,9 +321,9 @@ export default function ContactsTab() {
 
   const filteredContacts = useMemo(() => {
     return contacts.filter(
-        (c) =>
-            c.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            c.name.toLowerCase().includes(searchTerm.toLowerCase())
+      (c) =>
+        c.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.name.toLowerCase().includes(searchTerm.toLowerCase())
     )
   }, [contacts, searchTerm])
 
@@ -378,13 +389,13 @@ export default function ContactsTab() {
       <div className="flex flex-wrap gap-2 items-center">
         {/* New Add Single Contact Button */}
         <Button variant="default" onClick={() => {
-            setSyncStatus(null);
-            setIsAddModalOpen(true);
+          setSyncStatus(null);
+          setIsAddModalOpen(true);
         }} disabled={syncing}>
-            <Users className="w-4 h-4 mr-2" />
-            Add Single Contact
+          <Users className="w-4 h-4 mr-2" />
+          Add Single Contact
         </Button>
-        
+
         <label className="cursor-pointer">
           <Button variant="outline" asChild disabled={isParsing || syncing}>
             <div>
@@ -404,18 +415,18 @@ export default function ContactsTab() {
           Download
         </Button>
 
-        <Button 
-          variant="outline" 
-          onClick={() => handleSyncToDb(contacts)} 
+        <Button
+          variant="outline"
+          onClick={() => handleSyncToDb(contacts)}
           disabled={syncing || contacts.length === 0}>
           <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? "animate-spin" : ""}`} />
           {syncing ? "Syncing..." : "Sync to DB"}
         </Button>
-        
+
         {/* Bulk Delete Button */}
-        <Button 
-          variant="destructive" 
-          onClick={handleBulkDelete} 
+        <Button
+          variant="destructive"
+          onClick={handleBulkDelete}
           disabled={syncing || selectedForDelete.length === 0}>
           <Trash2 className="w-4 h-4 mr-2" />
           Delete Selected ({selectedForDelete.length})
@@ -425,79 +436,79 @@ export default function ContactsTab() {
       {/* Contact List */}
       <div>
         <div className="flex gap-2 items-center mb-4">
-            <Input
-              placeholder="Search by email or name..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="flex-1"
-              disabled={syncing}
+          <Input
+            placeholder="Search by email or name..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="flex-1"
+            disabled={syncing}
+          />
+          <div className="flex items-center space-x-2 flex-shrink-0">
+            <Checkbox
+              id="select-all"
+              checked={selectedForDelete.length > 0 && selectedForDelete.length === filteredContacts.length}
+              onCheckedChange={(checked: boolean) => handleSelectAllForDelete(checked)}
             />
-            <div className="flex items-center space-x-2 flex-shrink-0">
-                <Checkbox 
-                    id="select-all" 
-                    checked={selectedForDelete.length > 0 && selectedForDelete.length === filteredContacts.length}
-                    onCheckedChange={(checked: boolean) => handleSelectAllForDelete(checked)}
-                />
-                <label htmlFor="select-all" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                    Select All ({filteredContacts.length})
-                </label>
-            </div>
+            <label htmlFor="select-all" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+              Select All ({filteredContacts.length})
+            </label>
+          </div>
         </div>
-        
+
         <ScrollArea className="h-96 border rounded-lg p-4">
           <div className="flex flex-wrap gap-4 p-2">
             {filteredContacts.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground w-full">No contacts found. Upload a CSV or sync data.</div>
+              <div className="text-center py-8 text-muted-foreground w-full">No contacts found. Upload a CSV or sync data.</div>
             ) : (
-                filteredContacts.map((contact) => (
-                    <div 
-                        key={contact.email} 
-                        className="text-sm p-3 bg-muted rounded hover:bg-muted/80 border flex w-full sm:w-[calc(50%-8px)] lg:w-[calc(33.33%-10.66px)] items-start relative"
-                    >
-                        {/* Checkbox for Bulk Delete */}
-                        <div className="flex-shrink-0 pt-1 mr-3">
-                            <Checkbox 
-                                checked={selectedForDelete.includes(contact.email)}
-                                onCheckedChange={(checked: boolean) => handleToggleSelect(contact.email, checked)}
-                            />
-                        </div>
-                        
-                        {/* Contact Info and Custom Fields */}
-                        <div className="flex-1 min-w-0">
-                            <div className="font-medium truncate">{contact.name}</div>
-                            <div className="text-xs text-muted-foreground truncate">{contact.email}</div>
-                            {Object.keys(contact.customFields || {}).length > 0 && (
-                                <div className="text-xs text-muted-foreground mt-1 truncate">
-                                    {Object.entries(contact.customFields || {})
-                                    .map(([k, v]) => `${k}: ${v}`)
-                                    .join(" • ")}
-                                </div>
-                            )}
-                            
-                            {/* Stats */}
-                            <div className="flex items-center gap-3 text-xs font-mono mt-2">
-                                <div className="flex items-center text-green-600" title="Emails Sent Successfully">
-                                    <Check className="w-3 h-3 mr-1" />
-                                    <span>{contact.sent_count || 0}</span>
-                                </div>
-                                <div className="flex items-center text-yellow-600" title="Emails Scheduled / Pending">
-                                    <Clock className="w-3 h-3 mr-1" />
-                                    <span>{contact.pending_count || 0}</span>
-                                </div>
-                                <div className="flex items-center text-red-600" title="Emails Failed">
-                                    <X className="w-3 h-3 mr-1" />
-                                    <span>{contact.failed_count || 0}</span>
-                                </div>
-                            </div>
-                        </div>
+              filteredContacts.map((contact) => (
+                <div
+                  key={contact.email}
+                  className="text-sm p-3 bg-muted rounded hover:bg-muted/80 border flex w-full sm:w-[calc(50%-8px)] lg:w-[calc(33.33%-10.66px)] items-start relative"
+                >
+                  {/* Checkbox for Bulk Delete */}
+                  <div className="flex-shrink-0 pt-1 mr-3">
+                    <Checkbox
+                      checked={selectedForDelete.includes(contact.email)}
+                      onCheckedChange={(checked: boolean) => handleToggleSelect(contact.email, checked)}
+                    />
+                  </div>
 
+                  {/* Contact Info and Custom Fields */}
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium truncate">{contact.name}</div>
+                    <div className="text-xs text-muted-foreground truncate">{contact.email}</div>
+                    {Object.keys(contact.customFields || {}).length > 0 && (
+                      <div className="text-xs text-muted-foreground mt-1 truncate">
+                        {Object.entries(contact.customFields || {})
+                          .map(([k, v]) => `${k}: ${v}`)
+                          .join(" • ")}
+                      </div>
+                    )}
+
+                    {/* Stats */}
+                    <div className="flex items-center gap-3 text-xs font-mono mt-2">
+                      <div className="flex items-center text-green-600" title="Emails Sent Successfully">
+                        <Check className="w-3 h-3 mr-1" />
+                        <span>{contact.sent_count || 0}</span>
+                      </div>
+                      <div className="flex items-center text-yellow-600" title="Emails Scheduled / Pending">
+                        <Clock className="w-3 h-3 mr-1" />
+                        <span>{contact.pending_count || 0}</span>
+                      </div>
+                      <div className="flex items-center text-red-600" title="Emails Failed">
+                        <X className="w-3 h-3 mr-1" />
+                        <span>{contact.failed_count || 0}</span>
+                      </div>
                     </div>
-                ))
+                  </div>
+
+                </div>
+              ))
             )}
           </div>
         </ScrollArea>
       </div>
-      
+
       {/* CSV Preview Dialog (for upload process - unchanged) */}
       <Dialog open={isPreviewModalOpen} onOpenChange={setIsPreviewModalOpen}>
         <DialogContent className="max-w-4xl p-0">
@@ -513,34 +524,34 @@ export default function ContactsTab() {
           <Separator className="mx-6" />
 
           <div className="p-6 pt-0">
-             <ScrollArea className="h-[400px] border rounded-lg">
-                <table className="w-full text-left text-sm">
-                    <thead className="sticky top-0 bg-secondary/90 border-b">
-                        <tr>
-                            <th className="p-3">Name</th>
-                            <th className="p-3">Email</th>
-                            {contactsToPreview.length > 0 && 
-                                Object.keys(contactsToPreview[0]?.customFields || {}).map((key) => (
-                                    <th key={key} className="p-3">{key}</th>
-                                ))
-                            }
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {contactsToPreview.map((contact, index) => (
-                            <tr key={contact.email + index} className="border-b last:border-b-0 hover:bg-muted/50">
-                                <td className="p-3 font-medium">{contact.name}</td>
-                                <td className="p-3 text-muted-foreground">{contact.email}</td>
-                                {contactsToPreview.length > 0 && 
-                                    Object.keys(contactsToPreview[0]?.customFields || {}).map((key) => (
-                                        <td key={key} className="p-3 text-xs">{contact.customFields?.[key] || '-'}</td>
-                                    ))
-                                }
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-              </ScrollArea>
+            <ScrollArea className="h-[400px] border rounded-lg">
+              <table className="w-full text-left text-sm">
+                <thead className="sticky top-0 bg-secondary/90 border-b">
+                  <tr>
+                    <th className="p-3">Name</th>
+                    <th className="p-3">Email</th>
+                    {contactsToPreview.length > 0 &&
+                      Object.keys(contactsToPreview[0]?.customFields || {}).map((key) => (
+                        <th key={key} className="p-3">{key}</th>
+                      ))
+                    }
+                  </tr>
+                </thead>
+                <tbody>
+                  {contactsToPreview.map((contact, index) => (
+                    <tr key={contact.email + index} className="border-b last:border-b-0 hover:bg-muted/50">
+                      <td className="p-3 font-medium">{contact.name}</td>
+                      <td className="p-3 text-muted-foreground">{contact.email}</td>
+                      {contactsToPreview.length > 0 &&
+                        Object.keys(contactsToPreview[0]?.customFields || {}).map((key) => (
+                          <td key={key} className="p-3 text-xs">{contact.customFields?.[key] || '-'}</td>
+                        ))
+                      }
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ScrollArea>
           </div>
 
           <DialogFooter className="p-6 pt-0">
@@ -557,7 +568,7 @@ export default function ContactsTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
+
       {/* New: Add Single Contact Dialog */}
       <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
         <DialogContent className="max-w-md p-0">
@@ -607,14 +618,15 @@ export default function ContactsTab() {
             <Button variant="outline" onClick={() => setIsAddModalOpen(false)} disabled={syncing}>
               Cancel
             </Button>
-            <Button 
-              onClick={handleAddSingleContact} 
+            <Button
+              onClick={handleAddSingleContact}
               disabled={syncing || !newContact.email || !newContact.name}>
               {syncing ? <><Spinner className="w-4 h-4 mr-2" /> Adding...</> : "Add Contact"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {VerificationDialog}
     </div>
   )
 }
