@@ -134,6 +134,8 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
   const [previewContact, setPreviewContact] = useState<Contact | null>(null)
   const [imageUrl, setImageUrl] = useState("https://38y39fcx57.ufs.sh/f/mMGqMdgQNemikJNpBtzqlJrgITZDsSjhbB7K9eUa3MdxPvqL")
   const [verificationError, setVerificationError] = useState<string | null>(null)
+  const [companyFilters, setCompanyFilters] = useState<Record<string, boolean>>({});
+
   const { requireVerification, VerificationDialog } = useSecretVerification()
 
   const currentBatchConfig = BATCH_PRESETS[batchMode];
@@ -145,6 +147,15 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
         if (response.ok) {
           const data = await response.json()
           setContacts(data)
+          const companies = new Set<string>();
+          data.forEach((c: any) => {
+            if (c.custom_fields?.company) companies.add(c.custom_fields.company);
+          });
+          const filterObj: Record<string, boolean> = {};
+          companies.forEach(c => (filterObj[c] = true));
+          filterObj["none"] = true;
+          setCompanyFilters(filterObj);
+
         } else {
           setContacts([])
         }
@@ -179,12 +190,24 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
   }, [contacts]);
 
   const filteredContactsInModal = useMemo(() => {
-    return contactsToSchedule.filter(c =>
+    const base = contactsToSchedule.filter(c =>
       (c.email.toLowerCase().includes(contactSearchTerm.toLowerCase()) ||
         c.name.toLowerCase().includes(contactSearchTerm.toLowerCase())) &&
-      (companyFilter === "all" || (companyFilter === "none" && !c.custom_fields.company) || (c.custom_fields.company === companyFilter))
-    )
-  }, [contactsToSchedule, contactSearchTerm, companyFilter])
+      (
+        Object.keys(companyFilters).every(key => companyFilters[key] === true) ||
+        (c.custom_fields?.company && companyFilters[c.custom_fields.company]) ||
+        (!c.custom_fields.company && companyFilters["none"])
+      )
+    );
+
+    // ⭐ Sort so that selected contacts appear first
+    return base.sort((a, b) => {
+      const aChecked = selectedContactEmails.includes(a.email);
+      const bChecked = selectedContactEmails.includes(b.email);
+      return Number(bChecked) - Number(aChecked);
+    });
+  }, [contactsToSchedule, contactSearchTerm, companyFilters, selectedContactEmails]);
+
 
   const dynamicPreview = useMemo(() => {
     const contact = previewContact || contactsToSchedule[0] || { name: "Recipient", email: "example@email.com", custom_fields: {} as Record<string, string> };
@@ -722,33 +745,46 @@ export default function ComposeTab({ config, isTestingMode }: ComposeTabProps) {
                 onChange={(e) => setContactSearchTerm(e.target.value)}
                 className="flex-1"
               />
-              <select
-                value={companyFilter}
-                onChange={(e) => setCompanyFilter(e.target.value)}
-                className="px-3 py-2 rounded-md border border-input bg-background text-sm"
-              >
-                <option value="all">All Companies</option>
-                {uniqueCompanies.map(company => (
-                  <option key={company} value={company}>
-                    {company}
-                  </option>
+              <div className="flex flex-wrap gap-3">
+                {Object.keys(companyFilters).map(company => (
+                  <label
+                    key={company}
+                    className="flex items-center gap-2 bg-muted/50 px-3 py-1 rounded cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={companyFilters[company]}
+                      onChange={() =>
+                        setCompanyFilters(prev => ({
+                          ...prev,
+                          [company]: !prev[company]
+                        }))
+                      }
+                    />
+                    <span className="text-sm">
+                      {company === "none" ? "No Company Tag" : company}
+                    </span>
+                  </label>
                 ))}
-                <option value="none">No Company Tag</option>
-              </select>
+              </div>
+
             </div>
 
             <ScrollArea className="h-[400px] border rounded-lg p-2">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2">
-                {filteredContactsInModal.map(contact => (
+                {filteredContactsInModal.map((contact, idx) => (
                   <div
                     key={contact.email}
-                    className="flex items-center space-x-3 p-2 rounded-md hover:bg-muted/50 cursor-pointer border"
+                    className="relative flex items-center space-x-3 p-2 rounded-md hover:bg-muted/50 cursor-pointer border"
                     onClick={() => {
                       const isChecked = selectedContactEmails.includes(contact.email);
                       handleToggleContact(contact.email, !isChecked);
                       setPreviewContact(contact);
                     }}
                   >
+                    <div className="absolute -left-2 -top-2 bg-black/70 text-white text-xs font-bold px-2 py-0.5 rounded shadow">
+                      {idx + 1}
+                    </div>
                     <Checkbox
                       checked={selectedContactEmails.includes(contact.email)}
                       onCheckedChange={(checked: boolean) => {

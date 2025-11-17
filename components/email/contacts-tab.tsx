@@ -61,6 +61,7 @@ export default function ContactsTab() {
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
   const [contactsToPreview, setContactsToPreview] = useState<Contact[]>([])
   const [isParsing, setIsParsing] = useState(false)
+  const [companyFilters, setCompanyFilters] = useState<Record<string, boolean>>({});
 
   const { requireVerification, VerificationDialog } = useSecretVerification()
 
@@ -94,6 +95,10 @@ export default function ContactsTab() {
           failed_count: d.failed_count,
         }))
         setContacts(normalizedData)
+        const companies = new Set(normalizedData.map((c) => c.customFields?.company).filter(Boolean));
+        const filterObj: Record<string, boolean> = {};
+        companies.forEach((c: any) => filterObj[c] = true);
+        setCompanyFilters(filterObj);
         setSyncStatus(null);
       } else {
         setContacts(generateSampleContacts())
@@ -320,12 +325,28 @@ export default function ContactsTab() {
   }
 
   const filteredContacts = useMemo(() => {
-    return contacts.filter(
-      (c) =>
+    return contacts
+      .filter(c =>
         c.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.name.toLowerCase().includes(searchTerm.toLowerCase())
-    )
-  }, [contacts, searchTerm])
+      )
+      .sort((a, b) => {
+        const aCompany = a.customFields?.company;
+        const bCompany = b.customFields?.company;
+
+        const aEnabled = aCompany ? companyFilters[aCompany] !== false : false;
+        const bEnabled = bCompany ? companyFilters[bCompany] !== false : false;
+
+        // 1️⃣ Enabled (checked) companies first
+        if (aEnabled !== bEnabled) {
+          return aEnabled ? -1 : 1;
+        }
+
+        // 2️⃣ Maintain original order otherwise
+        return 0;
+      });
+  }, [contacts, searchTerm, companyFilters]);
+
 
   if (isLoading) {
     return <div className="text-center py-8 flex justify-center items-center gap-2"><Loader2 className="animate-spin w-5 h-5" /> Loading contacts...</div>
@@ -436,6 +457,25 @@ export default function ContactsTab() {
       {/* Contact List */}
       <div>
         <div className="flex gap-2 items-center mb-4 sticky top-[5vh] z-10 bg-black py-4">
+          <div className="flex flex-wrap gap-3 mb-4">
+            {Object.keys(companyFilters).map((company) => (
+              <label key={company} className="flex items-center gap-2 cursor-pointer bg-muted px-3 py-1 rounded">
+                <input
+                  type="checkbox"
+                  checked={companyFilters[company]}
+                  onChange={() => {
+                    setCompanyFilters(prev => ({
+                      ...prev,
+                      [company]: !prev[company]
+                    }));
+                  }}
+                />
+                <span className="text-sm">{company}</span>
+              </label>
+            ))}
+          </div>
+
+
           <Input
             placeholder="Search by email or name..."
             value={searchTerm}
@@ -446,8 +486,22 @@ export default function ContactsTab() {
           <div className="flex items-center space-x-2 shrink-0">
             <Checkbox
               id="select-all"
-              checked={selectedForDelete.length > 0 && selectedForDelete.length === filteredContacts.length}
-              onCheckedChange={(checked: boolean) => handleSelectAllForDelete(checked)}
+              checked={
+                filteredContacts.filter(c => {
+                  const company = c.customFields?.company;
+                  return company && companyFilters[company] !== false;
+                }).every(c => selectedForDelete.includes(c.email))
+              } onCheckedChange={(checked: boolean) => {
+                const visibleEnabledEmails = filteredContacts
+                  .filter(c => companyFilters[c.customFields?.company || ""] !== false)
+                  .map(c => c.email);
+
+                if (checked) {
+                  setSelectedForDelete(prev => Array.from(new Set([...prev, ...visibleEnabledEmails])));
+                } else {
+                  setSelectedForDelete(prev => prev.filter(e => !visibleEnabledEmails.includes(e)));
+                }
+              }}
             />
             <label htmlFor="select-all" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
               Select All ({filteredContacts.length})
@@ -460,11 +514,11 @@ export default function ContactsTab() {
             {filteredContacts.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground w-full">No contacts found. Upload a CSV or sync data.</div>
             ) : (
-              filteredContacts.map((contact) => (
-                <div
-                  key={contact.email}
-                  className="text-sm p-3 bg-muted rounded hover:bg-muted/80 border flex w-full sm:w-[calc(50%-8px)] lg:w-[calc(33.33%-10.66px)] items-start relative"
-                >
+              filteredContacts.map((contact, idx) => (
+                <div key={contact.email + idx} className="relative text-sm p-3 bg-muted rounded hover:bg-muted/80">
+                  <div className="absolute top-2 right-2 text-white text-xs font-bold bg-black/40 px-2 py-0.5 rounded">
+                    {idx + 1}
+                  </div>
                   {/* Checkbox for Bulk Delete */}
                   <div className="shrink-0 pt-1 mr-3">
                     <Checkbox
