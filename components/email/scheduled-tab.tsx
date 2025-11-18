@@ -20,7 +20,8 @@ import { useSecretVerification } from "@/components/security/use-secret-verifica
 
 interface BatchGroup {
   batchName: string;
-  batchIndex: number;
+  originalBatchIndex: number; // Original index from DB
+  displayBatchIndex: number; // Computed sequential index
   count: number;
   records: any[];
   status: 'pending' | 'sent' | 'validation_failed';
@@ -54,7 +55,7 @@ export default function ScheduledTab() {
       if (response.ok) {
         const data = await response.json();
 
-        // Group by batchName and batchIndex
+        // Group by batchName and originalBatchIndex (from DB)
         const batchMap = new Map<string, BatchGroup>();
 
         data.forEach((record: any) => {
@@ -62,7 +63,8 @@ export default function ScheduledTab() {
           if (!batchMap.has(key)) {
             batchMap.set(key, {
               batchName: record.batch_name,
-              batchIndex: record.batch_index,
+              originalBatchIndex: record.batch_index,
+              displayBatchIndex: 0, // Will be set later
               count: 0,
               records: [],
               status: record.status,
@@ -74,8 +76,15 @@ export default function ScheduledTab() {
           batch.records.push(record);
         });
 
-        // Convert to array and sort by batch index
-        const batchArray = Array.from(batchMap.values()).sort((a, b) => a.batchIndex - b.batchIndex);
+        // Convert to array and sort by original batch index
+        const batchArray = Array.from(batchMap.values()).sort((a, b) => 
+          a.originalBatchIndex - b.originalBatchIndex
+        );
+
+        // Assign sequential display batch indices (1, 2, 3, 4...)
+        batchArray.forEach((batch, index) => {
+          batch.displayBatchIndex = index + 1;
+        });
 
         setBatches(batchArray);
 
@@ -173,7 +182,7 @@ export default function ScheduledTab() {
   const executeBatch = async (batch: BatchGroup) => {
     if (isExecuting) return
 
-    const ok = await requireVerification({ actionLabel: `send scheduled batch #${batch.batchIndex}` })
+    const ok = await requireVerification({ actionLabel: `send scheduled batch #${batch.displayBatchIndex}` })
     if (!ok) {
       setConfirmBatch(null)
       setConfirmCountdown(AUTO_SEND_COUNTDOWN)
@@ -192,7 +201,7 @@ export default function ScheduledTab() {
       if (batch.status === "validation_failed") {
         toast({
           title: "Cannot Execute",
-          description: `Batch ${batch.batchIndex} failed validation.`,
+          description: `Batch ${batch.displayBatchIndex} failed validation.`,
           variant: "destructive",
         })
         setIsExecuting(false)
@@ -234,7 +243,7 @@ export default function ScheduledTab() {
 
       toast({
         title: "Sending Batch",
-        description: `Executing Batch ${batch.batchIndex} (${batch.count} emails)...`,
+        description: `Executing Batch ${batch.displayBatchIndex} (${batch.count} emails)...`,
         variant: "default",
       })
 
@@ -246,7 +255,7 @@ export default function ScheduledTab() {
       if (response.ok) {
         toast({
           title: "Batch Sent! 🎉",
-          description: `Batch ${batch.batchIndex} sent successfully (${batch.count} emails).`,
+          description: `Batch ${batch.displayBatchIndex} sent successfully (${batch.count} emails).`,
           variant: "default",
         })
         setLastSentTime(Date.now())
@@ -341,7 +350,7 @@ export default function ScheduledTab() {
                     ✓ READY
                   </div>
                   <p className="text-lg font-semibold text-green-700 dark:text-green-300">
-                    You can send Batch #{nextBatch.batchIndex} now!
+                    You can send Batch #{nextBatch.displayBatchIndex} now!
                   </p>
                 </>
               ) : (
@@ -374,12 +383,12 @@ export default function ScheduledTab() {
           {isExecuting ? (
             <>
               <Spinner className="w-5 h-5 mr-2" />
-              Sending Batch {nextBatch.batchIndex}...
+              Sending Batch {nextBatch.displayBatchIndex}...
             </>
           ) : isReadyToSend() ? (
             <>
               <Play className="w-5 h-5 mr-2" />
-              Send Batch #{nextBatch.batchIndex} Now ({nextBatch.count} emails)
+              Send Batch #{nextBatch.displayBatchIndex} Now ({nextBatch.count} emails)
             </>
           ) : (
             <>
@@ -402,17 +411,17 @@ export default function ScheduledTab() {
                 <p className="text-center text-muted-foreground py-6">No pending batches.</p>
               ) : (
                 pendingBatches.map((batch) => (
-                  <Card key={`${batch.batchName}-${batch.batchIndex}`} className="p-3 border-orange-500 border-2">
+                  <Card key={`${batch.batchName}-${batch.originalBatchIndex}`} className="p-3 border-orange-500 border-2">
                     <div className="flex justify-between items-center">
                       <div className="space-y-1">
-                        <div className="font-semibold">Batch #{batch.batchIndex}</div>
+                        <div className="font-semibold">Batch #{batch.displayBatchIndex}</div>
                         <div className="text-sm text-muted-foreground">{batch.count} emails</div>
                         <div className="flex gap-2">
                           <Badge variant="secondary" className="bg-orange-500 text-white">PENDING</Badge>
                           <Badge variant="outline">{batch.batchMode === 'legacy' ? 'Legacy' : 'Standard'}</Badge>
                         </div>
                       </div>
-                      <div className="text-4xl font-bold text-orange-600">#{batch.batchIndex}</div>
+                      <div className="text-4xl font-bold text-orange-600">#{batch.displayBatchIndex}</div>
                     </div>
                   </Card>
                 ))
@@ -436,10 +445,10 @@ export default function ScheduledTab() {
                 sentBatches.map((batch) => {
                   const sentRecord = batch.records.find(r => r.sent_at);
                   return (
-                    <Card key={`${batch.batchName}-${batch.batchIndex}`} className="p-3 border-green-500 border">
+                    <Card key={`${batch.batchName}-${batch.originalBatchIndex}`} className="p-3 border-green-500 border">
                       <div className="flex justify-between items-center">
                         <div className="space-y-1">
-                          <div className="font-semibold">Batch #{batch.batchIndex}</div>
+                          <div className="font-semibold">Batch #{batch.displayBatchIndex}</div>
                           <div className="text-sm text-muted-foreground">
                             {batch.count} emails • Sent {sentRecord ? new Date(sentRecord.sent_at).toLocaleString() : ''}
                           </div>
@@ -468,9 +477,9 @@ export default function ScheduledTab() {
             <ScrollArea style={{ height: '150px' }}>
               <div className="space-y-2">
                 {failedBatches.map((batch) => (
-                  <Card key={`${batch.batchName}-${batch.batchIndex}`} className="p-3 bg-red-50 dark:bg-red-950/30 border-red-500">
+                  <Card key={`${batch.batchName}-${batch.originalBatchIndex}`} className="p-3 bg-red-50 dark:bg-red-950/30 border-red-500">
                     <div className="space-y-1">
-                      <div className="font-semibold">Batch #{batch.batchIndex}</div>
+                      <div className="font-semibold">Batch #{batch.displayBatchIndex}</div>
                       <div className="text-sm text-red-700">{batch.count} emails affected</div>
                       <Badge variant="destructive">VALIDATION FAILED</Badge>
                     </div>
@@ -490,7 +499,7 @@ export default function ScheduledTab() {
               <Play className="w-6 h-6" /> Confirm Batch Send
             </DialogTitle>
             <DialogDescription>
-              About to send Batch #{confirmBatch?.batchIndex} ({confirmBatch?.count} emails).
+              About to send Batch #{confirmBatch?.displayBatchIndex} ({confirmBatch?.count} emails).
               This will auto-send in the remaining time.
             </DialogDescription>
           </DialogHeader>
